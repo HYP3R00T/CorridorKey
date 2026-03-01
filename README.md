@@ -132,6 +132,38 @@ Priority: `--device` flag > `CORRIDORKEY_DEVICE` env var > auto-detect.
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 ```
 
+## Backend Selection
+
+CorridorKey supports two inference backends:
+- **Torch** (default on Linux/Windows) — CUDA, MPS, or CPU
+- **MLX** (Apple Silicon) — native Metal acceleration, no Torch overhead
+
+Resolution: `--backend` flag > `CORRIDORKEY_BACKEND` env var > auto-detect.
+Auto mode prefers MLX on Apple Silicon when available.
+
+### MLX Setup (Apple Silicon)
+
+1. Install the MLX backend from sibling checkout:
+   ```bash
+   uv pip install -e ../corridorkey-mlx
+   ```
+2. Place converted weights in `CorridorKeyModule/checkpoints/`:
+   ```
+   CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors
+   ```
+3. Run with auto-detection or explicit backend:
+   ```bash
+   CORRIDORKEY_BACKEND=mlx uv run python clip_manager.py --action run_inference
+   ```
+
+MLX uses img_size=2048 by default (same as Torch).
+
+### Troubleshooting
+- **"No .safetensors checkpoint found"** — place MLX weights in `CorridorKeyModule/checkpoints/`
+- **"corridorkey_mlx not installed"** — run `uv pip install -e ../corridorkey-mlx`
+- **"MLX requires Apple Silicon"** — MLX only works on M1+ Macs
+- **Auto picked Torch unexpectedly** — set `CORRIDORKEY_BACKEND=mlx` explicitly
+
 ## Advanced Usage
 
 For developers looking for more details on the specifics of what is happening in the CorridorKey engine, check out the README in the `/CorridorKeyModule` folder. We also have a dedicated handover document outlining the pipeline architecture for AI assistants in `/docs/LLM_HANDOVER.md`.

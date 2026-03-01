@@ -173,7 +173,7 @@ No .safetensors checkpoint found in CorridorKeyModule/checkpoints/.
 (Found .pth files — did you mean --backend=torch?)
 ```
 
-### Phase 5: Tests
+### Phase 5: Tests ✅
 
 **`tests/conftest.py`** — add `mlx` marker:
 ```python
@@ -196,7 +196,7 @@ markers = [
 - Assert output keys, shapes, dtypes (float32, [H,W,1], [H,W,3], [H,W,4])
 - Assert value ranges (0-1 float)
 
-### Phase 6: README
+### Phase 6: README ✅
 
 Add section after "Device Selection" (from PR #33):
 
@@ -249,9 +249,9 @@ MLX uses img_size=2048 by default (same as Torch).
 - [x] Adapter applies despill/despeckle from `color_utils.py`
 - [x] Adapter constructs `processed` as `[H,W,4]` linear premul RGBA
 - [x] `uv run pytest` passes (existing + new tests)
-- [ ] MLX smoke test at 2048 passes on Apple Silicon
-- [ ] README documents backend selection and MLX setup
-- [ ] `uv pip install -e ../corridorkey-mlx` works for local dev
+- [x] MLX smoke test at 2048 passes on Apple Silicon
+- [x] README documents backend selection and MLX setup
+- [x] `uv pip install -e ../corridorkey-mlx` works for local dev
 
 ## Unresolved Questions
 
