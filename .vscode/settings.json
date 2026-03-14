@@ -21,6 +21,8 @@
   "python.terminal.activateEnvironment": false,
   "ruff.lint.enable": true,
   "ruff.nativeServer": true,
+  "ty.inlayHints.callArgumentNames": false,
+  "ty.inlayHints.variableTypes": false,
   "yaml.schemas": {
     "https://json.schemastore.org/github-issue-forms.json": [
       ".github/ISSUE_TEMPLATE/*.yml"
