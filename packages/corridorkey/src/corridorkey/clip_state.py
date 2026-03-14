@@ -1,28 +1,21 @@
 """Clip entry data model and state machine.
 
-State Machine:
-    EXTRACTING - Video input being extracted to image sequence
-    RAW        - Input asset found, no alpha hint yet
-    MASKED     - User mask provided (for VideoMaMa workflow)
-    READY      - Alpha hint available (from GVM or VideoMaMa), ready for inference
-    COMPLETE   - Inference outputs written
-    ERROR      - Processing failed (can retry)
+State machine transitions:
 
-Transitions:
-    EXTRACTING -> RAW   (extraction completes)
-    EXTRACTING -> ERROR (extraction fails)
-    RAW -> MASKED       (user provides VideoMaMa mask)
-    RAW -> READY        (GVM auto-generates alpha)
-    RAW -> ERROR        (GVM/scan fails)
-    MASKED -> READY     (VideoMaMa generates alpha from user mask)
-    MASKED -> ERROR     (VideoMaMa fails)
-    READY -> COMPLETE   (inference succeeds)
-    READY -> ERROR      (inference fails)
-    ERROR -> RAW        (retry from scratch)
-    ERROR -> MASKED     (retry with mask)
-    ERROR -> READY      (retry inference)
-    ERROR -> EXTRACTING (retry extraction)
-    COMPLETE -> READY   (reprocess with different params)
+    EXTRACTING -> RAW        extraction completes
+    EXTRACTING -> ERROR      extraction fails
+    RAW        -> MASKED     user provides a VideoMaMa mask
+    RAW        -> READY      alpha generator produces AlphaHint
+    RAW        -> ERROR      alpha generation or scan fails
+    MASKED     -> READY      VideoMaMa generates alpha from mask
+    MASKED     -> ERROR      VideoMaMa fails
+    READY      -> COMPLETE   inference succeeds
+    READY      -> ERROR      inference fails
+    ERROR      -> RAW        retry from scratch
+    ERROR      -> MASKED     retry with mask
+    ERROR      -> READY      retry inference only
+    ERROR      -> EXTRACTING retry extraction
+    COMPLETE   -> READY      reprocess with different params
 """
 
 from __future__ import annotations
@@ -33,15 +26,18 @@ import os
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .errors import ClipScanError, InvalidStateTransitionError
-from .natural_sort import natsorted
-from .project import is_image_file as _is_image_file
-from .project import is_video_file as _is_video_file
+from corridorkey.errors import ClipScanError, InvalidStateTransitionError
+from corridorkey.models import InOutRange
+from corridorkey.natural_sort import natsorted
+from corridorkey.project import is_image_file as _is_image_file
+from corridorkey.project import is_video_file as _is_video_file
 
 logger = logging.getLogger(__name__)
 
 
 class ClipState(Enum):
+    """Processing state of a single clip."""
+
     EXTRACTING = "EXTRACTING"
     RAW = "RAW"
     MASKED = "MASKED"
@@ -50,29 +46,36 @@ class ClipState(Enum):
     ERROR = "ERROR"
 
 
-# Valid transitions: from_state -> set of allowed to_states
+# Valid state transitions: from_state -> set of allowed to_states.
 _TRANSITIONS: dict[ClipState, set[ClipState]] = {
     ClipState.EXTRACTING: {ClipState.RAW, ClipState.ERROR},
     ClipState.RAW: {ClipState.MASKED, ClipState.READY, ClipState.ERROR},
     ClipState.MASKED: {ClipState.READY, ClipState.ERROR},
     ClipState.READY: {ClipState.COMPLETE, ClipState.ERROR},
-    ClipState.COMPLETE: {ClipState.READY},  # reprocess with different params
+    ClipState.COMPLETE: {ClipState.READY},
     ClipState.ERROR: {ClipState.RAW, ClipState.MASKED, ClipState.READY, ClipState.EXTRACTING},
 }
 
 
 @dataclass
 class ClipAsset:
-    """Represents an input source - either an image sequence directory or a video file."""
+    """An input source - either an image sequence directory or a video file.
+
+    Attributes:
+        path: Absolute path to the directory or video file.
+        asset_type: Either 'sequence' or 'video'.
+        frame_count: Number of frames detected at construction time.
+    """
 
     path: str
-    asset_type: str  # 'sequence' or 'video'
+    asset_type: str
     frame_count: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self._calculate_length()
 
-    def _calculate_length(self):
+    def _calculate_length(self) -> None:
+        """Populate frame_count by inspecting the asset on disk."""
         if self.asset_type == "sequence":
             if os.path.isdir(self.path):
                 files = [f for f in os.listdir(self.path) if _is_image_file(f)]
@@ -87,16 +90,19 @@ class ClipAsset:
                 if cap.isOpened():
                     self.frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                     if self.frame_count == 0:
-                        logger.warning(f"Video reports 0 frames, file may be corrupted: {self.path}")
+                        logger.warning("Video reports 0 frames, file may be corrupted: %s", self.path)
                 cap.release()
             except Exception as e:
-                logger.debug(f"Video frame count detection failed for {self.path}: {e}")
+                logger.debug("Video frame count detection failed for %s: %s", self.path, e)
                 self.frame_count = 0
 
     def get_frame_files(self) -> list[str]:
-        """Return naturally sorted list of frame filenames for sequence assets.
+        """Return naturally sorted frame filenames for sequence assets.
 
-        Uses natural sort so frame_2 sorts before frame_10 (not lexicographic).
+        Uses natural sort so frame_2 sorts before frame_10.
+
+        Returns:
+            List of filenames (not full paths). Empty list for video assets.
         """
         if self.asset_type != "sequence" or not os.path.isdir(self.path):
             return []
@@ -104,43 +110,35 @@ class ClipAsset:
 
 
 @dataclass
-class InOutRange:
-    """In/out frame range for sub-clip processing. Both indices inclusive, 0-based."""
-
-    in_point: int
-    out_point: int
-
-    @property
-    def frame_count(self) -> int:
-        return self.out_point - self.in_point + 1
-
-    def contains(self, index: int) -> bool:
-        return self.in_point <= index <= self.out_point
-
-    def to_dict(self) -> dict:
-        return {"in_point": self.in_point, "out_point": self.out_point}
-
-    @classmethod
-    def from_dict(cls, d: dict) -> InOutRange:
-        return cls(in_point=d["in_point"], out_point=d["out_point"])
-
-
-@dataclass
 class ClipEntry:
-    """A single shot/clip with its assets and processing state."""
+    """A single shot/clip with its assets and processing state.
+
+    Attributes:
+        name: Human-readable clip name (may be overridden by display_name in JSON).
+        root_path: Absolute path to the clip folder.
+        state: Current processing state.
+        input_asset: Input image sequence or video.
+        alpha_asset: AlphaHint image sequence or video.
+        mask_asset: Optional VideoMaMa mask hint.
+        in_out_range: Per-clip in/out markers. None means process the full clip.
+        warnings: Non-fatal warnings accumulated during scanning.
+        error_message: Set when state is ERROR.
+        extraction_progress: Progress fraction (0.0-1.0) during EXTRACTING.
+        extraction_total: Total frames expected during extraction.
+    """
 
     name: str
     root_path: str
     state: ClipState = ClipState.RAW
     input_asset: ClipAsset | None = None
     alpha_asset: ClipAsset | None = None
-    mask_asset: ClipAsset | None = None  # User-provided VideoMaMa mask
-    in_out_range: InOutRange | None = None  # Per-clip in/out markers (None = full clip)
+    mask_asset: ClipAsset | None = None
+    in_out_range: InOutRange | None = None
     warnings: list[str] = field(default_factory=list)
     error_message: str | None = None
-    extraction_progress: float = 0.0  # 0.0 to 1.0 during EXTRACTING
-    extraction_total: int = 0  # total frames expected during extraction
-    _processing: bool = field(default=False, repr=False)  # lock: watcher must not reclassify
+    extraction_progress: float = 0.0
+    extraction_total: int = 0
+    _processing: bool = field(default=False, repr=False)
 
     @property
     def is_processing(self) -> bool:
@@ -148,35 +146,47 @@ class ClipEntry:
         return self._processing
 
     def set_processing(self, value: bool) -> None:
-        """Set processing lock. Watcher skips reclassification while True."""
+        """Set the processing lock. Watcher skips reclassification while True.
+
+        Args:
+            value: True to lock, False to release.
+        """
         self._processing = value
 
     def transition_to(self, new_state: ClipState) -> None:
-        """Attempt a state transition. Raises InvalidStateTransitionError if not allowed."""
+        """Attempt a state transition.
+
+        Args:
+            new_state: Target state.
+
+        Raises:
+            InvalidStateTransitionError: If the transition is not allowed.
+        """
         if new_state not in _TRANSITIONS.get(self.state, set()):
             raise InvalidStateTransitionError(self.name, self.state.value, new_state.value)
         old = self.state
         self.state = new_state
         if new_state != ClipState.ERROR:
             self.error_message = None
-        logger.debug(f"Clip '{self.name}': {old.value} -> {new_state.value}")
+        logger.debug("Clip '%s': %s -> %s", self.name, old.value, new_state.value)
 
     def set_error(self, message: str) -> None:
-        """Transition to ERROR state with a message.
+        """Transition to ERROR state and record a message.
 
-        Works from any state that allows ERROR transition
-        (RAW, MASKED, READY - all can error now).
+        Args:
+            message: Description of the failure.
         """
         self.transition_to(ClipState.ERROR)
         self.error_message = message
 
     @property
     def output_dir(self) -> str:
+        """Absolute path to the Output subdirectory."""
         return os.path.join(self.root_path, "Output")
 
     @property
     def has_outputs(self) -> bool:
-        """Check if output directory exists with content."""
+        """True if the Output directory exists and contains at least one file."""
         out = self.output_dir
         if not os.path.isdir(out):
             return False
@@ -187,18 +197,21 @@ class ClipEntry:
         return False
 
     def completed_frame_count(self) -> int:
-        """Count existing output frames for resume support.
+        """Count output frames that have all enabled outputs written.
 
-        Manifest-aware: reads .corridorkey_manifest.json to determine which
-        outputs were enabled. Falls back to FG+Matte intersection if no manifest.
+        Returns:
+            Number of fully-completed frames.
         """
         return len(self.completed_stems())
 
     def completed_stems(self) -> set[str]:
-        """Return set of frame stems that have all enabled outputs complete.
+        """Return frame stems that have all enabled outputs complete.
 
         Reads the run manifest to determine which outputs to check.
-        Falls back to FG+Matte intersection if no manifest exists.
+        Falls back to FG+Matte intersection when no manifest exists.
+
+        Returns:
+            Set of stem strings (e.g. {'frame_000001', 'frame_000002'}).
         """
         manifest = self._read_manifest()
         enabled = manifest.get("enabled_outputs", []) if manifest else ["fg", "matte"]
@@ -210,27 +223,29 @@ class ClipEntry:
             "processed": os.path.join(self.output_dir, "Processed"),
         }
 
-        stem_sets = []
+        stem_sets: list[set[str]] = []
         for output_name in enabled:
             d = dir_map.get(output_name)
             if d and os.path.isdir(d):
                 stems = {os.path.splitext(f)[0] for f in os.listdir(d) if _is_image_file(f)}
                 stem_sets.append(stems)
             else:
-                # Required dir missing -> no complete frames
                 return set()
 
         if not stem_sets:
             return set()
 
-        # Intersection: frame complete only if ALL enabled outputs exist
         result = stem_sets[0]
         for s in stem_sets[1:]:
             result &= s
         return result
 
     def _read_manifest(self) -> dict | None:
-        """Read the run manifest if it exists."""
+        """Read the run manifest if it exists.
+
+        Returns:
+            Parsed manifest dict, or None if not found or unreadable.
+        """
         manifest_path = os.path.join(self.output_dir, ".corridorkey_manifest.json")
         if not os.path.isfile(manifest_path):
             return None
@@ -240,12 +255,16 @@ class ClipEntry:
             with open(manifest_path) as f:
                 return json.load(f)
         except Exception as e:
-            logger.debug(f"Failed to read manifest at {manifest_path}: {e}")
+            logger.debug("Failed to read manifest at %s: %s", manifest_path, e)
             return None
 
     def _resolve_original_path(self) -> str | None:
-        """Resolve the original video path from clip.json or project.json."""
-        from .project import _read_clip_or_project_json
+        """Resolve the original video path from clip.json or project.json.
+
+        Returns:
+            Absolute path to the original video, or None if not found.
+        """
+        from corridorkey.project import _read_clip_or_project_json
 
         data = _read_clip_or_project_json(self.root_path)
         if not data:
@@ -259,10 +278,13 @@ class ClipEntry:
     def find_assets(self) -> None:
         """Scan the clip directory for Input, AlphaHint, and mask assets.
 
-        Updates state accordingly. Supports both new format (Frames/, Source/)
-        and legacy format (Input/, Input.*) for backward compatibility.
+        Supports both the current format (Frames/, Source/) and the legacy
+        format (Input/, Input.*) for backward compatibility. Updates state
+        based on what is found.
+
+        Raises:
+            ClipScanError: If no valid input asset can be located.
         """
-        # Input asset - check new names first, fall back to legacy
         frames_dir = os.path.join(self.root_path, "Frames")
         input_dir = os.path.join(self.root_path, "Input")
         source_dir = os.path.join(self.root_path, "Source")
@@ -274,12 +296,8 @@ class ClipEntry:
         elif os.path.isdir(source_dir):
             videos = [f for f in os.listdir(source_dir) if _is_video_file(f)]
             if videos:
-                self.input_asset = ClipAsset(
-                    os.path.join(source_dir, videos[0]),
-                    "video",
-                )
+                self.input_asset = ClipAsset(os.path.join(source_dir, videos[0]), "video")
             else:
-                # Source/ exists but is empty - check project.json for external reference
                 original = self._resolve_original_path()
                 if original:
                     self.input_asset = ClipAsset(original, "video")
@@ -295,65 +313,57 @@ class ClipEntry:
             else:
                 raise ClipScanError(f"Clip '{self.name}': no Input found.")
 
-        # Load display name from project.json if available
-        from .project import get_display_name
+        from corridorkey.project import get_display_name
 
         display = get_display_name(self.root_path)
         if display != os.path.basename(self.root_path):
             self.name = display
 
-        # Alpha hint asset
         alpha_dir = os.path.join(self.root_path, "AlphaHint")
         if os.path.isdir(alpha_dir) and os.listdir(alpha_dir):
             self.alpha_asset = ClipAsset(alpha_dir, "sequence")
 
-        # VideoMaMa mask hint - directory OR video file
         mask_dir = os.path.join(self.root_path, "VideoMamaMaskHint")
         if os.path.isdir(mask_dir) and os.listdir(mask_dir):
             self.mask_asset = ClipAsset(mask_dir, "sequence")
         else:
-            # Check for mask video file (VideoMamaMaskHint.mp4 etc.)
             mask_candidates = glob_module.glob(os.path.join(self.root_path, "VideoMamaMaskHint.*"))
             mask_candidates = [c for c in mask_candidates if _is_video_file(c)]
             if mask_candidates:
                 self.mask_asset = ClipAsset(mask_candidates[0], "video")
 
-        # Load in/out range from project.json
-        from .project import load_in_out_range
+        from corridorkey.project import load_in_out_range
 
         self.in_out_range = load_in_out_range(self.root_path)
 
-        # Determine initial state
         self._resolve_state()
 
     def _resolve_state(self) -> None:
-        """Set state based on what assets are present on disk.
+        """Set state based on assets present on disk.
 
-        Recovers the furthest pipeline stage from disk contents so the
-        user never loses completed work after a restart or crash.
+        Recovers the furthest pipeline stage so the user never loses
+        completed work after a restart or crash.
 
         Priority (highest first):
-          COMPLETE  - all input frames have matching outputs (manifest-aware)
-          READY     - AlphaHint exists (inference-ready)
-          MASKED    - VideoMaMa mask hint exists
+          COMPLETE   - all input frames have matching outputs (manifest-aware)
+          READY      - AlphaHint covers all input frames
+          MASKED     - VideoMaMa mask hint exists
           EXTRACTING - video source exists but no frame sequence yet
-          RAW       - frame sequence exists, no alpha/mask/output
+          RAW        - frame sequence exists, no alpha/mask/output
         """
-        # Check COMPLETE first: outputs exist and cover all input frames
         if self.alpha_asset is not None and self.input_asset is not None:
             completed = self.completed_stems()
             if completed and len(completed) >= self.input_asset.frame_count:
                 self.state = ClipState.COMPLETE
                 return
 
-        # READY: AlphaHint must cover ALL input frames (not partial)
         if self.alpha_asset is not None:
             if self.input_asset is not None and self.alpha_asset.frame_count < self.input_asset.frame_count:
-                # Partial alpha - don't promote to READY, fall through
                 logger.info(
-                    f"Clip '{self.name}': partial alpha "
-                    f"({self.alpha_asset.frame_count}/{self.input_asset.frame_count}), "
-                    f"staying at lower state"
+                    "Clip '%s': partial alpha (%d/%d), staying at lower state",
+                    self.name,
+                    self.alpha_asset.frame_count,
+                    self.input_asset.frame_count,
                 )
             else:
                 self.state = ClipState.READY
@@ -362,7 +372,6 @@ class ClipEntry:
         if self.mask_asset is not None:
             self.state = ClipState.MASKED
         elif self.input_asset is not None and self.input_asset.asset_type == "video":
-            # Video input needs extraction to image sequence
             self.state = ClipState.EXTRACTING
         else:
             self.state = ClipState.RAW
@@ -371,8 +380,8 @@ class ClipEntry:
 def scan_project_clips(project_dir: str) -> list[ClipEntry]:
     """Scan a single project directory for its clips.
 
-    v2 projects (with ``clips/`` subdir): each subdirectory inside clips/ is a clip.
-    v1 projects (no ``clips/`` subdir): the project dir itself is a single clip.
+    v2 projects (with a clips/ subdir): each subdirectory inside clips/ is a clip.
+    v1 projects (no clips/ subdir): the project dir itself is a single clip.
 
     Args:
         project_dir: Absolute path to a project folder.
@@ -380,7 +389,7 @@ def scan_project_clips(project_dir: str) -> list[ClipEntry]:
     Returns:
         List of ClipEntry objects with root_path pointing to clip subdirectories.
     """
-    from .project import is_v2_project
+    from corridorkey.project import is_v2_project
 
     if is_v2_project(project_dir):
         clips_dir = os.path.join(project_dir, "clips")
@@ -396,17 +405,16 @@ def scan_project_clips(project_dir: str) -> list[ClipEntry]:
                 clip.find_assets()
                 entries.append(clip)
             except ClipScanError as e:
-                logger.debug(str(e))
-        logger.info(f"Scanned v2 project {project_dir}: {len(entries)} clip(s)")
+                logger.debug("%s", e)
+        logger.info("Scanned v2 project %s: %d clip(s)", project_dir, len(entries))
         return entries
 
-    # v1 fallback: project_dir is itself a single clip
     clip = ClipEntry(name=os.path.basename(project_dir), root_path=project_dir)
     try:
         clip.find_assets()
         return [clip]
     except ClipScanError as e:
-        logger.debug(str(e))
+        logger.debug("%s", e)
         return []
 
 
@@ -420,22 +428,25 @@ def scan_clips_dir(
     scan_project_clips() for each, flattening results.
 
     For non-Projects directories: scans subdirectories directly as clips
-    (legacy behavior for drag-and-dropped folders).
+    (legacy behaviour for drag-and-dropped folders).
 
-    Folders without valid input assets are skipped (not added as broken clips).
+    Folders without valid input assets are silently skipped.
 
     Args:
         clips_dir: Path to scan.
-        allow_standalone_videos: If False, loose video files at top level are ignored.
-            Set False for the Projects root where videos live inside Source/ subdirs.
+        allow_standalone_videos: When False, loose video files at the top
+            level are ignored. Set False for the Projects root where videos
+            live inside Source/ subdirectories.
+
+    Returns:
+        List of ClipEntry objects found in the directory.
     """
     entries: list[ClipEntry] = []
     if not os.path.isdir(clips_dir):
-        logger.warning(f"Clips directory not found: {clips_dir}")
+        logger.warning("Clips directory not found: %s", clips_dir)
         return entries
 
-    # If the directory itself is a v2 project, scan its clips directly
-    from .project import is_v2_project
+    from corridorkey.project import is_v2_project
 
     if is_v2_project(clips_dir):
         return scan_project_clips(clips_dir)
@@ -445,41 +456,35 @@ def scan_clips_dir(
     for item in sorted(os.listdir(clips_dir)):
         item_path = os.path.join(clips_dir, item)
 
-        # Skip hidden and special items
         if item.startswith(".") or item.startswith("_"):
             continue
 
         if os.path.isdir(item_path):
-            # Check if this is a v2 project container (has clips/ subdir)
-            from .project import is_v2_project
+            from corridorkey.project import is_v2_project as _is_v2
 
-            if is_v2_project(item_path):
-                # v2 project: scan its clips/ subdirectory
+            if _is_v2(item_path):
                 for clip in scan_project_clips(item_path):
                     if clip.name not in seen_names:
                         entries.append(clip)
                         seen_names.add(clip.name)
             else:
-                # Flat clip dir or v1 project
                 clip = ClipEntry(name=item, root_path=item_path)
                 try:
                     clip.find_assets()
                     entries.append(clip)
                     seen_names.add(clip.name)
                 except ClipScanError as e:
-                    # Skip folders without valid input assets
-                    logger.debug(str(e))
+                    logger.debug("%s", e)
 
         elif allow_standalone_videos and os.path.isfile(item_path) and _is_video_file(item_path):
-            # Standalone video file -> treat as a clip needing extraction
             stem = os.path.splitext(item)[0]
             if stem in seen_names:
-                continue  # folder clip already exists with this name
+                continue
             clip = ClipEntry(name=stem, root_path=clips_dir)
             clip.input_asset = ClipAsset(item_path, "video")
             clip.state = ClipState.EXTRACTING
             entries.append(clip)
             seen_names.add(stem)
 
-    logger.info(f"Scanned {clips_dir}: {len(entries)} clip(s) found")
+    logger.info("Scanned %s: %d clip(s) found", clips_dir, len(entries))
     return entries

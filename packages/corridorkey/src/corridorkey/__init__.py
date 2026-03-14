@@ -1,19 +1,19 @@
-"""CorridorKey - Application Layer for the CorridorKey AI chroma keying pipeline."""
+"""CorridorKey - application layer for the CorridorKey AI chroma keying pipeline."""
 
-from . import device_utils
-from .clip_state import (
+from corridorkey import device_utils
+from corridorkey.clip_state import (
     ClipAsset,
     ClipEntry,
     ClipState,
-    InOutRange,
     scan_clips_dir,
     scan_project_clips,
 )
-from .engine_factory import create_engine, resolve_backend
-from .errors import CorridorKeyError
-from .job_queue import GPUJob, GPUJobQueue, JobStatus, JobType
-from .natural_sort import natsorted, natural_sort_key
-from .project import (
+from corridorkey.errors import CorridorKeyError
+from corridorkey.job_queue import GPUJob, GPUJobQueue, JobStatus, JobType
+from corridorkey.models import InOutRange
+from corridorkey.natural_sort import natsorted, natural_sort_key
+from corridorkey.pipeline import ClipSummary, PipelineResult, process_directory
+from corridorkey.project import (
     VIDEO_FILE_FILTER,
     add_clips_to_project,
     create_project,
@@ -30,7 +30,8 @@ from .project import (
     write_clip_json,
     write_project_json,
 )
-from .service import CorridorKeyService, FrameResult, InferenceParams, OutputConfig
+from corridorkey.protocols import AlphaGenerator
+from corridorkey.service import CorridorKeyService, FrameResult, InferenceParams, OutputConfig
 
 __all__ = [
     # Service
@@ -38,18 +39,22 @@ __all__ = [
     "InferenceParams",
     "OutputConfig",
     "FrameResult",
-    # Engine factory
-    "create_engine",
-    "resolve_backend",
+    # Protocols
+    "AlphaGenerator",
+    # Pipeline
+    "process_directory",
+    "PipelineResult",
+    "ClipSummary",
     # Device utils
     "device_utils",
     # Clip state
     "ClipAsset",
     "ClipEntry",
     "ClipState",
-    "InOutRange",
     "scan_clips_dir",
     "scan_project_clips",
+    # Models
+    "InOutRange",
     # Job queue
     "GPUJob",
     "GPUJobQueue",

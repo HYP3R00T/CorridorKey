@@ -1,11 +1,12 @@
 """Project folder management - creation, scanning, and metadata.
 
 A project is a timestamped container holding one or more clips:
+
     Projects/
         260301_093000_Woman_Jumps/
-            project.json                    (v2 - project-level metadata)
+            project.json                    (v2 project-level metadata)
             clips/
-                Woman_Jumps/                (ClipEntry.root_path -> here)
+                Woman_Jumps/                (ClipEntry.root_path points here)
                     Source/
                         Woman_Jumps_For_Joy.mp4
                     Frames/
@@ -15,7 +16,8 @@ A project is a timestamped container holding one or more clips:
                 Man_Walks/
                     Source/...
 
-Legacy v1 format (no clips/ dir) is still supported for backward compat.
+Legacy v1 format (no clips/ subdirectory) is still supported for backward
+compatibility.
 """
 
 from __future__ import annotations
@@ -28,23 +30,31 @@ import shutil
 import sys
 from datetime import datetime
 
+from corridorkey.models import InOutRange
+
 logger = logging.getLogger(__name__)
 
 _VIDEO_EXTS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".mxf", ".webm", ".m4v"})
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".dpx"})
+
+# Qt-style file dialog filter string for video files.
 VIDEO_FILE_FILTER = "Video Files (*.mp4 *.mov *.avi *.mkv *.mxf *.webm *.m4v);;All Files (*)"
 
 _app_dir: str | None = None
 
 
 def _dedupe_path(parent_dir: str, stem: str) -> tuple[str, str]:
-    """Return a unique child path under *parent_dir* and its final stem.
+    """Return a unique child path under parent_dir and its final stem.
 
     If ``{parent_dir}/{stem}`` already exists, appends numeric suffixes
     (``_2``, ``_3``, ...) until a free path is found.
 
-    Unlike fixed-range probes, this never silently falls back to an existing
-    path after enough collisions.
+    Args:
+        parent_dir: Directory in which to create the child.
+        stem: Desired folder name.
+
+    Returns:
+        Tuple of (absolute_path, final_stem).
     """
     path = os.path.join(parent_dir, stem)
     if not os.path.exists(path):
@@ -60,7 +70,11 @@ def _dedupe_path(parent_dir: str, stem: str) -> tuple[str, str]:
 
 
 def set_app_dir(path: str) -> None:
-    """Set the application directory. Called once at startup by main.py."""
+    """Set the application directory. Call once at startup.
+
+    Args:
+        path: Absolute path to the application directory.
+    """
     global _app_dir
     _app_dir = path
 
@@ -68,15 +82,19 @@ def set_app_dir(path: str) -> None:
 def projects_root() -> str:
     """Return the Projects root directory, creating it if needed.
 
-    In dev mode: {repo_root}/Projects/
-    In frozen mode: {exe_dir}/Projects/
+    Resolution order:
+      1. ``{_app_dir}/Projects/`` if set_app_dir() was called.
+      2. ``{exe_dir}/Projects/`` when running as a frozen executable.
+      3. ``{repo_root}/Projects/`` in development mode.
+
+    Returns:
+        Absolute path to the Projects root directory.
     """
     if _app_dir:
         root = os.path.join(_app_dir, "Projects")
     elif getattr(sys, "frozen", False):
         root = os.path.join(os.path.dirname(sys.executable), "Projects")
     else:
-        # Fallback: two levels up from this file (backend/ -> repo root)
         root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Projects")
     os.makedirs(root, exist_ok=True)
     return root
@@ -85,8 +103,15 @@ def projects_root() -> str:
 def sanitize_stem(filename: str, max_len: int = 60) -> str:
     """Clean a filename stem for use in folder names.
 
-    Strips extension, replaces non-alphanumeric chars with underscores,
-    collapses runs, and truncates.
+    Strips the extension, replaces non-alphanumeric characters with
+    underscores, collapses consecutive underscores, and truncates.
+
+    Args:
+        filename: Original filename (with or without extension).
+        max_len: Maximum length of the returned stem.
+
+    Returns:
+        Sanitized stem string safe for use as a folder name.
     """
     stem = os.path.splitext(filename)[0]
     stem = re.sub(r"[^\w\-]", "_", stem)
@@ -100,28 +125,26 @@ def create_project(
     copy_source: bool = True,
     display_name: str | None = None,
 ) -> str:
-    """Create a new project folder for one or more source videos.
+    """Create a new v2 project folder for one or more source videos.
 
-    Creates a v2 project with a ``clips/`` subdirectory.  Each video
-    gets its own clip subfolder inside ``clips/``.
+    Each video gets its own clip subfolder inside ``clips/``. When
+    copy_source is True the video is copied into ``Source/``; otherwise
+    only a reference path is stored in clip.json.
 
-    When *copy_source* is True (default), video files are copied into
-    each clip's ``Source/`` directory.  When False, the clip stores a
-    reference to the original file path.
-
-    Creates: Projects/YYMMDD_HHMMSS_{stem}/clips/{clip_stem}/Source/...
+    Creates: ``Projects/YYMMDD_HHMMSS_{stem}/clips/{clip_stem}/Source/...``
 
     Args:
-        source_video_paths: Single video path (str) or list of paths.
-        copy_source: Whether to copy video files into clip folders.
-        display_name: Optional project name. If provided, used for both
-            the folder name stem and display_name in project.json.
-            If None, derived from the first video filename.
+        source_video_paths: Single video path or list of paths.
+        copy_source: Copy video files into clip folders when True.
+        display_name: Optional project name. Derived from the first video
+            filename when None.
 
     Returns:
         Absolute path to the new project folder.
+
+    Raises:
+        ValueError: If source_video_paths is empty.
     """
-    # Accept single path for backward compat
     if isinstance(source_video_paths, str):
         source_video_paths = [source_video_paths]
     if not source_video_paths:
@@ -131,7 +154,6 @@ def create_project(
 
     if display_name and display_name.strip():
         clean = display_name.strip()
-        # Sanitize for folder name (no splitext - it's not a filename)
         name_stem = re.sub(r"[^\w\-]", "_", clean)
         name_stem = re.sub(r"_+", "_", name_stem).strip("_")[:60]
         project_display_name = clean
@@ -143,7 +165,6 @@ def create_project(
     timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
     folder_name = f"{timestamp}_{name_stem}"
 
-    # Deduplicate if folder already exists (e.g. rapid imports)
     project_dir, _ = _dedupe_path(root, folder_name)
 
     clips_dir = os.path.join(project_dir, "clips")
@@ -151,14 +172,9 @@ def create_project(
 
     clip_names: list[str] = []
     for video_path in source_video_paths:
-        clip_name = _create_clip_folder(
-            clips_dir,
-            video_path,
-            copy_source=copy_source,
-        )
+        clip_name = _create_clip_folder(clips_dir, video_path, copy_source=copy_source)
         clip_names.append(clip_name)
 
-    # Write project.json (v2 - project-level metadata only)
     write_project_json(
         project_dir,
         {
@@ -183,24 +199,19 @@ def add_clips_to_project(
     Args:
         project_dir: Absolute path to the project folder.
         source_video_paths: List of video file paths to add.
-        copy_source: Whether to copy videos into clip folders.
+        copy_source: Copy videos into clip folders when True.
 
     Returns:
-        List of new clip subfolder paths (absolute).
+        List of absolute paths to the new clip subfolders.
     """
     clips_dir = os.path.join(project_dir, "clips")
     os.makedirs(clips_dir, exist_ok=True)
 
     new_paths: list[str] = []
     for video_path in source_video_paths:
-        clip_name = _create_clip_folder(
-            clips_dir,
-            video_path,
-            copy_source=copy_source,
-        )
+        clip_name = _create_clip_folder(clips_dir, video_path, copy_source=copy_source)
         new_paths.append(os.path.join(clips_dir, clip_name))
 
-    # Update project.json clips list
     data = read_project_json(project_dir) or {}
     existing = data.get("clips", [])
     for p in new_paths:
@@ -219,12 +230,17 @@ def _create_clip_folder(
 ) -> str:
     """Create a single clip subfolder inside clips_dir.
 
-    Returns the clip folder name (not full path).
+    Args:
+        clips_dir: Parent directory for clip subfolders.
+        video_path: Absolute path to the source video.
+        copy_source: Copy the video into Source/ when True.
+
+    Returns:
+        The clip folder name (not the full path).
     """
     filename = os.path.basename(video_path)
     clip_name = sanitize_stem(filename)
 
-    # Deduplicate clip folder names within same project
     clip_dir, clip_name = _dedupe_path(clips_dir, clip_name)
 
     source_dir = os.path.join(clip_dir, "Source")
@@ -234,11 +250,10 @@ def _create_clip_folder(
         target = os.path.join(source_dir, filename)
         if not os.path.isfile(target):
             shutil.copy2(video_path, target)
-            logger.info(f"Copied source video: {video_path} -> {target}")
+            logger.info("Copied source video: %s -> %s", video_path, target)
     else:
-        logger.info(f"Referencing source video in place: {video_path}")
+        logger.info("Referencing source video in place: %s", video_path)
 
-    # Write clip.json (per-clip metadata)
     write_clip_json(
         clip_dir,
         {
@@ -256,8 +271,14 @@ def _create_clip_folder(
 def get_clip_dirs(project_dir: str) -> list[str]:
     """Return absolute paths to all clip subdirectories in a project.
 
-    For v2 projects (with clips/ dir), scans clips/ subdirectories.
-    For v1 projects (no clips/ dir), returns [project_dir] as a single clip.
+    For v2 projects (with a clips/ subdirectory) scans that directory.
+    For v1 projects returns [project_dir] as a single-clip fallback.
+
+    Args:
+        project_dir: Absolute path to the project folder.
+
+    Returns:
+        Sorted list of absolute clip directory paths.
     """
     clips_dir = os.path.join(project_dir, "clips")
     if os.path.isdir(clips_dir):
@@ -266,17 +287,28 @@ def get_clip_dirs(project_dir: str) -> list[str]:
             for d in os.listdir(clips_dir)
             if os.path.isdir(os.path.join(clips_dir, d)) and not d.startswith(".") and not d.startswith("_")
         )
-    # v1 fallback: project dir itself is the clip
     return [project_dir]
 
 
 def is_v2_project(project_dir: str) -> bool:
-    """Check if a project uses the v2 nested clips structure."""
+    """Check whether a project uses the v2 nested clips structure.
+
+    Args:
+        project_dir: Absolute path to the project folder.
+
+    Returns:
+        True if a clips/ subdirectory exists.
+    """
     return os.path.isdir(os.path.join(project_dir, "clips"))
 
 
 def write_project_json(project_root: str, data: dict) -> None:
-    """Atomic write of project.json."""
+    """Atomically write project.json.
+
+    Args:
+        project_root: Absolute path to the project folder.
+        data: Dict to serialise as JSON.
+    """
     path = os.path.join(project_root, "project.json")
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
@@ -285,7 +317,14 @@ def write_project_json(project_root: str, data: dict) -> None:
 
 
 def read_project_json(project_root: str) -> dict | None:
-    """Read project.json, returning None if missing or corrupt."""
+    """Read project.json, returning None if missing or corrupt.
+
+    Args:
+        project_root: Absolute path to the project folder.
+
+    Returns:
+        Parsed dict, or None on failure.
+    """
     path = os.path.join(project_root, "project.json")
     if not os.path.isfile(path):
         return None
@@ -293,12 +332,17 @@ def read_project_json(project_root: str) -> dict | None:
         with open(path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Failed to read project.json at {path}: {e}")
+        logger.warning("Failed to read project.json at %s: %s", path, e)
         return None
 
 
 def write_clip_json(clip_root: str, data: dict) -> None:
-    """Atomic write of clip.json (per-clip metadata)."""
+    """Atomically write clip.json (per-clip metadata).
+
+    Args:
+        clip_root: Absolute path to the clip folder.
+        data: Dict to serialise as JSON.
+    """
     path = os.path.join(clip_root, "clip.json")
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
@@ -307,7 +351,14 @@ def write_clip_json(clip_root: str, data: dict) -> None:
 
 
 def read_clip_json(clip_root: str) -> dict | None:
-    """Read clip.json, returning None if missing or corrupt."""
+    """Read clip.json, returning None if missing or corrupt.
+
+    Args:
+        clip_root: Absolute path to the clip folder.
+
+    Returns:
+        Parsed dict, or None on failure.
+    """
     path = os.path.join(clip_root, "clip.json")
     if not os.path.isfile(path):
         return None
@@ -315,12 +366,19 @@ def read_clip_json(clip_root: str) -> dict | None:
         with open(path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Failed to read clip.json at {path}: {e}")
+        logger.warning("Failed to read clip.json at %s: %s", path, e)
         return None
 
 
 def _read_clip_or_project_json(root: str) -> dict | None:
-    """Read clip.json first, falling back to project.json for v1 compat."""
+    """Read clip.json first, falling back to project.json for v1 compatibility.
+
+    Args:
+        root: Absolute path to a clip or project folder.
+
+    Returns:
+        Parsed dict from whichever file was found, or None.
+    """
     data = read_clip_json(root)
     if data is not None:
         return data
@@ -330,7 +388,14 @@ def _read_clip_or_project_json(root: str) -> dict | None:
 def get_display_name(root: str) -> str:
     """Get the user-visible name for a clip or project.
 
-    Checks clip.json first, then project.json, falling back to folder name.
+    Checks clip.json first, then project.json, falling back to the
+    folder name.
+
+    Args:
+        root: Absolute path to a clip or project folder.
+
+    Returns:
+        Display name string.
     """
     data = _read_clip_or_project_json(root)
     if data and data.get("display_name"):
@@ -339,7 +404,14 @@ def get_display_name(root: str) -> str:
 
 
 def set_display_name(root: str, name: str) -> None:
-    """Update display_name. Writes to clip.json if it exists, else project.json."""
+    """Update the display_name in clip.json or project.json.
+
+    Writes to clip.json when it exists, otherwise to project.json.
+
+    Args:
+        root: Absolute path to a clip or project folder.
+        name: New display name.
+    """
     if os.path.isfile(os.path.join(root, "clip.json")):
         data = read_clip_json(root) or {}
         data["display_name"] = name
@@ -350,10 +422,14 @@ def set_display_name(root: str, name: str) -> None:
         write_project_json(root, data)
 
 
-def save_in_out_range(clip_root: str, in_out) -> None:
-    """Persist in/out range to clip.json (v2) or project.json (v1).
+def save_in_out_range(clip_root: str, in_out: InOutRange | None) -> None:
+    """Persist an in/out range to clip.json or project.json.
 
-    Pass None to clear.
+    Pass None to clear the stored range.
+
+    Args:
+        clip_root: Absolute path to the clip folder.
+        in_out: Range to store, or None to remove.
     """
     if os.path.isfile(os.path.join(clip_root, "clip.json")):
         data = read_clip_json(clip_root) or {}
@@ -371,13 +447,18 @@ def save_in_out_range(clip_root: str, in_out) -> None:
         write_project_json(clip_root, data)
 
 
-def load_in_out_range(clip_root: str):
-    """Load in/out range from clip.json or project.json, or None if not set."""
+def load_in_out_range(clip_root: str) -> InOutRange | None:
+    """Load an in/out range from clip.json or project.json.
+
+    Args:
+        clip_root: Absolute path to the clip folder.
+
+    Returns:
+        InOutRange if stored, otherwise None.
+    """
     data = _read_clip_or_project_json(clip_root)
     if data and "in_out_range" in data:
         try:
-            from .clip_state import InOutRange
-
             return InOutRange.from_dict(data["in_out_range"])
         except (KeyError, TypeError):
             return None
@@ -385,10 +466,24 @@ def load_in_out_range(clip_root: str):
 
 
 def is_video_file(filename: str) -> bool:
-    """Check if a filename has a video extension."""
+    """Check whether a filename has a recognised video extension.
+
+    Args:
+        filename: Filename or path to check.
+
+    Returns:
+        True if the extension is in the known video set.
+    """
     return os.path.splitext(filename)[1].lower() in _VIDEO_EXTS
 
 
 def is_image_file(filename: str) -> bool:
-    """Check if a filename has an image extension."""
+    """Check whether a filename has a recognised image extension.
+
+    Args:
+        filename: Filename or path to check.
+
+    Returns:
+        True if the extension is in the known image set.
+    """
     return os.path.splitext(filename)[1].lower() in _IMAGE_EXTS

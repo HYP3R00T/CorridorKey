@@ -1,12 +1,12 @@
 """GPU job queue with mutual exclusion.
 
-Ensures only ONE GPU job runs at a time across all job types
-(inference, GVM alpha gen, VideoMaMa alpha gen). This prevents VRAM
+Ensures only ONE GPU job runs at a time across all job types (inference,
+alpha generation, video extraction/stitching). This prevents VRAM
 contention - CorridorKey alone needs ~22.7GB of 24GB.
 
 Design:
     - Thread-safe queue of GPUJob dataclasses
-    - Single consumer loop (designed to be driven by a QThread in the UI,
+    - Single consumer loop (designed to be driven by a QThread in the GUI,
       or called directly in CLI mode)
     - Jobs carry a cancel flag checked between frames
     - Callbacks for progress, warnings, completion, errors
@@ -26,15 +26,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from .errors import JobCancelledError
+from corridorkey.errors import JobCancelledError
 
 logger = logging.getLogger(__name__)
 
 
 class JobType(Enum):
     INFERENCE = "inference"
-    GVM_ALPHA = "gvm_alpha"
-    VIDEOMAMA_ALPHA = "videomama_alpha"
+    ALPHA_GEN = "alpha_gen"
     PREVIEW_REPROCESS = "preview_reprocess"
     VIDEO_EXTRACT = "video_extract"
     VIDEO_STITCH = "video_stitch"
@@ -134,14 +133,16 @@ class GPUJobQueue:
                 for old in replaced:
                     self._queue.remove(old)
                     old.status = JobStatus.CANCELLED
-                    logger.debug(f"Preview reprocess [{old.id}] replaced by [{job.id}]")
+                    logger.debug("Preview reprocess [%s] replaced by [%s]", old.id, job.id)
             else:
                 # Deduplication: reject if same clip+job_type already queued or running
                 for existing in self._queue:
                     if existing.clip_name == job.clip_name and existing.job_type == job.job_type:
                         logger.warning(
-                            f"Duplicate job rejected: {job.job_type.value} for '{job.clip_name}' "
-                            f"(already queued as {existing.id})"
+                            "Duplicate job rejected: %s for '%s' (already queued as %s)",
+                            job.job_type.value,
+                            job.clip_name,
+                            existing.id,
                         )
                         return False
                 if (
@@ -151,14 +152,16 @@ class GPUJobQueue:
                     and self._current_job.status == JobStatus.RUNNING
                 ):
                     logger.warning(
-                        f"Duplicate job rejected: {job.job_type.value} for '{job.clip_name}' "
-                        f"(already running as {self._current_job.id})"
+                        "Duplicate job rejected: %s for '%s' (already running as %s)",
+                        job.job_type.value,
+                        job.clip_name,
+                        self._current_job.id,
                     )
                     return False
 
             job.status = JobStatus.QUEUED
             self._queue.append(job)
-            logger.info(f"Job queued [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
+            logger.info("Job queued [%s]: %s for '%s'", job.id, job.job_type.value, job.clip_name)
             return True
 
     def next_job(self) -> GPUJob | None:
@@ -175,7 +178,7 @@ class GPUJobQueue:
                 self._queue.remove(job)
             job.status = JobStatus.RUNNING
             self._current_job = job
-            logger.info(f"Job started [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
+            logger.info("Job started [%s]: %s for '%s'", job.id, job.job_type.value, job.clip_name)
 
     def complete_job(self, job: GPUJob) -> None:
         """Mark a job as successfully completed."""
@@ -184,7 +187,7 @@ class GPUJobQueue:
             if self._current_job is job:
                 self._current_job = None
             self._history.append(job)
-            logger.info(f"Job completed [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
+            logger.info("Job completed [%s]: %s for '%s'", job.id, job.job_type.value, job.clip_name)
         # Emit AFTER lock release (Codex: no deadlock risk)
         if self.on_completion:
             self.on_completion(job.clip_name)
@@ -197,7 +200,7 @@ class GPUJobQueue:
             if self._current_job is job:
                 self._current_job = None
             self._history.append(job)
-            logger.error(f"Job failed [{job.id}]: {job.job_type.value} for '{job.clip_name}': {error}")
+            logger.error("Job failed [%s]: %s for '%s': %s", job.id, job.job_type.value, job.clip_name, error)
         # Emit AFTER lock release
         if self.on_error:
             self.on_error(job.clip_name, error)
@@ -214,7 +217,7 @@ class GPUJobQueue:
             if self._current_job is job:
                 self._current_job = None
             self._history.append(job)
-            logger.info(f"Job cancelled [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
+            logger.info("Job cancelled [%s]: %s for '%s'", job.id, job.job_type.value, job.clip_name)
 
     def cancel_job(self, job: GPUJob) -> None:
         """Request cancellation of a specific job."""
@@ -224,11 +227,11 @@ class GPUJobQueue:
                     self._queue.remove(job)
                 job.status = JobStatus.CANCELLED
                 self._history.append(job)
-                logger.info(f"Job removed from queue [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
+                logger.info("Job removed from queue [%s]: %s for '%s'", job.id, job.job_type.value, job.clip_name)
             elif job.status == JobStatus.RUNNING:
                 # Signal cancel - worker calls mark_cancelled() after catching JobCancelledError
                 job.request_cancel()
-                logger.info(f"Job cancel requested [{job.id}]: {job.job_type.value} for '{job.clip_name}'")
+                logger.info("Job cancel requested [%s]: %s for '%s'", job.id, job.job_type.value, job.clip_name)
 
     def cancel_current(self) -> None:
         """Cancel the currently running job, if any."""
