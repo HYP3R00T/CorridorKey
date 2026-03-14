@@ -14,14 +14,23 @@ Unmarked tests must always pass with no special hardware or files.
 
 ## How Markers Work
 
-The `conftest.py` in each `tests/` folder registers custom CLI flags and automatically skips marked tests unless the flag is passed.
+The root `conftest.py` registers the custom CLI flags and automatically skips marked tests unless the corresponding flag is passed. This applies to all packages in a single run.
 
 ```python
-# conftest.py
+# conftest.py (repo root)
+def pytest_addoption(parser):
+    parser.addoption("--run-slow", action="store_true", default=False)
+    parser.addoption("--run-gpu", action="store_true", default=False)
+    parser.addoption("--run-mlx", action="store_true", default=False)
+
 def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords and not config.getoption("--run-slow"):
             item.add_marker(pytest.mark.skip(reason="Pass --run-slow to run"))
+        if "gpu" in item.keywords and not config.getoption("--run-gpu"):
+            item.add_marker(pytest.mark.skip(reason="Pass --run-gpu to run"))
+        if "mlx" in item.keywords and not config.getoption("--run-mlx"):
+            item.add_marker(pytest.mark.skip(reason="Pass --run-mlx to run"))
 ```
 
 This means you never need to pass `-m` on the command line. The default `mise run test` just works.
@@ -46,25 +55,27 @@ def test_process_frame_on_cuda(): ...
 def test_full_pipeline_4k(): ...
 ```
 
-## Coverage and `# pragma: no cover`
+## Coverage and Omitted Modules
 
-Code that cannot run without hardware is excluded from coverage measurement using `# pragma: no cover`. This prevents the coverage threshold from being dragged down by code that is legitimately untestable in CI.
+Hardware-dependent modules are excluded from coverage measurement entirely via `omit` in each package's `pyproject.toml`. This prevents the coverage threshold from being dragged down by code that is legitimately untestable in CI.
 
 Current exclusions:
 
-| Code | Reason |
-|---|---|
-| `CorridorKeyEngine` class | Requires a real checkpoint file |
-| `_MLXEngineAdapter` class | Requires Apple Silicon and MLX |
-| `_wrap_mlx_output` function | Only called by the MLX adapter |
-| MLX and Torch branches in `create_engine` | Require checkpoint or MLX hardware |
-| `inference_engine.py` (entire file) | Omitted via `[tool.coverage.run] omit` |
+| Package | Module | Reason |
+|---|---|---|
+| `corridorkey-core` | `inference_engine.py` | Requires a real checkpoint file |
+| `corridorkey` | `service.py` | Requires GPU, real checkpoint, and filesystem |
+| `corridorkey` | `ffmpeg_tools.py` | Requires FFmpeg installed as a system dependency |
+| `corridorkey` | `frame_io.py` | Requires real video/image files on disk |
+| `corridorkey` | `device_utils.py` | Requires CUDA or MPS hardware |
 
-Do not add `# pragma: no cover` to avoid writing a test. It is only for code that genuinely cannot run in CI.
+Additionally, `# pragma: no cover` is used on individual branches within covered files (e.g. the MLX and Torch branches in `create_engine`) where the branch requires hardware but the surrounding code is otherwise testable.
+
+Do not add `# pragma: no cover` or `omit` entries to avoid writing a test. They are only for code that genuinely cannot run in CI.
 
 ## Coverage Threshold
 
-The fast suite enforces a minimum of 75% coverage. Run `mise run test-cov` to check. The threshold is defined in `packages/corridorkey-core/pyproject.toml`:
+The fast suite enforces a minimum of 75% combined coverage across all packages. Run `mise run test-cov` to check. The threshold is defined in the root `pyproject.toml`:
 
 ```toml
 [tool.coverage.report]
