@@ -155,7 +155,9 @@ def discover_checkpoint(checkpoint_dir: str | Path, ext: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _wrap_mlx_output(mlx_output: dict, despill_strength: float, auto_despeckle: bool, despeckle_size: int) -> dict:
+def _wrap_mlx_output(
+    mlx_output: dict, despill_strength: float, auto_despeckle: bool, despeckle_size: int
+) -> dict:  # pragma: no cover
     """Normalize MLX uint8 output to match the Torch float32 contract.
 
     MLX engines return uint8 arrays and stub out despill/despeckle.
@@ -213,7 +215,7 @@ def _wrap_mlx_output(mlx_output: dict, despill_strength: float, auto_despeckle: 
 # ---------------------------------------------------------------------------
 
 
-class _MLXEngineAdapter:
+class _MLXEngineAdapter:  # pragma: no cover
     """Wraps CorridorKeyMLXEngine to expose the same process_frame() contract as CorridorKeyEngine.
 
     MLX engines expect uint8 inputs and return uint8 outputs with despill/despeckle
@@ -292,7 +294,7 @@ def create_engine(
     """
     backend = resolve_backend(backend)
 
-    if backend == "mlx":
+    if backend == "mlx":  # pragma: no cover
         ckpt = discover_checkpoint(Path(checkpoint_dir), MLX_EXT)
         from corridorkey_mlx import CorridorKeyMLXEngine  # type: ignore[import-not-found]
 
@@ -303,7 +305,7 @@ def create_engine(
 
     # Torch
     ckpt = discover_checkpoint(Path(checkpoint_dir), TORCH_EXT)
-    from corridorkey_core.inference_engine import CorridorKeyEngine
+    from corridorkey_core.inference_engine import CorridorKeyEngine  # pragma: no cover
 
-    logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device or "cpu")
-    return CorridorKeyEngine(checkpoint_path=ckpt, device=device or "cpu", img_size=img_size)
+    logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device or "cpu")  # pragma: no cover
+    return CorridorKeyEngine(checkpoint_path=ckpt, device=device or "cpu", img_size=img_size)  # pragma: no cover

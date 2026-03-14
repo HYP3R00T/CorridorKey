@@ -168,6 +168,12 @@ mlx = [
     { name = "corridorkey-mlx" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "corridorkey-mlx", marker = "extra == 'mlx'", git = "https://github.com/nikopueringer/corridorkey-mlx.git" },
@@ -179,6 +185,12 @@ requires-dist = [
     { name = "torchvision", marker = "extra == 'cuda'", specifier = "==0.25.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "corridorkey-core", extra = "cuda" } },
 ]
 provides-extras = ["cuda", "mlx"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "corridorkey-mlx"
