@@ -54,6 +54,13 @@ addopts = "--tb=short"
 
 [tool.coverage.run]
 source = ["corridorkey"]
+omit = [
+  # Hardware-dependent modules - require real GPU/FFmpeg/filesystem
+  "*/corridorkey/service.py",
+  "*/corridorkey/ffmpeg_tools.py",
+  "*/corridorkey/frame_io.py",
+  "*/corridorkey/device_utils.py",
+]
 
 [tool.coverage.report]
 fail_under = 75
