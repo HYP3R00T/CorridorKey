@@ -46,3 +46,7 @@ description = "Run fast tests with coverage report (fails under 75%)"
 [tasks.check-ascii]
 run = "uv run python scripts/check_ascii.py"
 description = "Check for non-ASCII characters in docs and source files"
+
+[tasks.profile]
+run = "uv run --project packages/corridorkey-core python scripts/profile_engine.py"
+description = "Profile inference engine (requires CUDA + CK_CHECKPOINT_PATH env var)"
