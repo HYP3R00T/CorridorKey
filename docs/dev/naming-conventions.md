@@ -3,6 +3,27 @@
 This document defines naming conventions for all Python identifiers in this repository.
 All conventions follow standard Python style (PEP 8) with project-specific rules layered on top.
 
+## Packages
+
+Use lowercase with hyphens. Names must be prefixed with `corridorkey-` to namespace them
+within the project, followed by a noun or noun phrase describing the layer or domain.
+
+(GOOD)
+
+- `corridorkey-core` - the core inference layer
+- `corridorkey-app` - the application orchestration layer
+- `corridorkey-cli` - the command-line interface
+
+(AVOID)
+
+- `core` - not namespaced, will conflict with other packages
+- `corridorkey_core` - use hyphens for package names, underscores are for Python module names
+- `CorridorKeyCore` - wrong case
+
+Note: the Python import name (the `src/` folder) uses underscores as required by Python
+(e.g. `corridorkey_core`), but the installable package name in `pyproject.toml` uses hyphens
+(e.g. `corridorkey-core`).
+
 ## Modules (Files)
 
 Use lowercase with underscores. Names must be gerunds or nouns that describe what the module does, not what it contains.
