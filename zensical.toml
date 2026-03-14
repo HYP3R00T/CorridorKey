@@ -11,6 +11,13 @@ nav = [
     ] },
     { Development = [
         { "Developer Setup" = "dev/developer-setup.md" },
+        { "Testing" = [
+            { "Overview" = "dev/testing/index.md" },
+            { "Unit Tests" = "dev/testing/unit-tests.md" },
+            { "Integration Tests" = "dev/testing/integration-tests.md" },
+            { "Property-Based Tests" = "dev/testing/property-tests.md" },
+            { "Hardware-Gated Tests" = "dev/testing/hardware-gated.md" },
+        ] },
         { "Authoring Documentation" = "dev/authoring-documentation.md" },
         { "Naming Conventions" = "dev/naming-conventions.md" },
         { "Documentation Principles" = [

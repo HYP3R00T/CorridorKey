@@ -74,6 +74,7 @@ Use for structured data. Keep simple (3-5 columns ideal):
 | **Clarity** | Define acronyms once | Use undefined abbreviations |
 | **Code examples** | Show context: `cd docs` then run command | Isolated commands without setup |
 | **Consistency** | Use same terms throughout | Mix terminology |
+| **Characters** | ASCII only - hyphens `-`, quotes `"`, apostrophes `'` | Smart quotes `"`, em dashes `--`, ellipses `...`, or any non-ASCII character |
 
 ## Before Committing
 
@@ -88,6 +89,7 @@ Verify:
 - Code blocks render
 - Admonitions display
 - Tables aligned
+- No non-ASCII characters (`mise run check-ascii`)
 - Follows documentation principles
 - Matches current code (no fiction)
 
