@@ -1,6 +1,7 @@
 """Validation utilities for frame processing.
 
-All validators either return cleaned data or raise typed exceptions from errors.py.
+All validators either return cleaned data or raise typed exceptions
+from corridorkey.errors.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import os
 
 import numpy as np
 
-from .errors import (
+from corridorkey.errors import (
     FrameMismatchError,
     FrameReadError,
     MaskChannelError,
@@ -29,24 +30,27 @@ def validate_frame_counts(
     """Validate that input and alpha frame counts are compatible.
 
     Args:
-        clip_name: For error messages.
+        clip_name: Clip name used in error messages.
         input_count: Number of input frames.
         alpha_count: Number of alpha frames.
-        strict: If True, raises on mismatch. If False, logs warning and returns min.
+        strict: Raise on mismatch when True; log a warning and return the
+            minimum when False.
 
     Returns:
-        The number of frames to process (min of both).
+        Number of frames to process (minimum of both counts).
 
     Raises:
-        FrameMismatchError: If strict=True and counts differ.
+        FrameMismatchError: If strict is True and counts differ.
     """
     if input_count != alpha_count:
         if strict:
             raise FrameMismatchError(clip_name, input_count, alpha_count)
         logger.warning(
-            f"Clip '{clip_name}': frame count mismatch - "
-            f"input has {input_count}, alpha has {alpha_count}. "
-            f"Truncating to {min(input_count, alpha_count)}."
+            "Clip '%s': frame count mismatch - input has %d, alpha has %d. Truncating to %d.",
+            clip_name,
+            input_count,
+            alpha_count,
+            min(input_count, alpha_count),
         )
     return min(input_count, alpha_count)
 
@@ -58,20 +62,22 @@ def normalize_mask_channels(
 ) -> np.ndarray:
     """Reduce a mask to a single-channel 2D array.
 
-    Handles any channel count: extracts first channel from multi-channel masks.
+    Extracts the first channel from multi-channel masks.
 
     Args:
-        mask: Input mask array, any shape [H, W] or [H, W, C].
-        clip_name: For error messages.
-        frame_index: For error messages.
+        mask: Input mask array of shape [H, W] or [H, W, C].
+        clip_name: Clip name used in error messages.
+        frame_index: Frame index used in error messages.
 
     Returns:
-        2D numpy array [H, W] with float32 values.
+        2D float32 array of shape [H, W].
+
+    Raises:
+        MaskChannelError: If the array has zero channels or unexpected ndim.
     """
     if mask.ndim == 3:
         if mask.shape[2] == 0:
             raise MaskChannelError(clip_name, frame_index, 0)
-        # Always extract first channel regardless of channel count
         mask = mask[:, :, 0]
     elif mask.ndim != 2:
         raise MaskChannelError(clip_name, frame_index, mask.ndim)
@@ -80,7 +86,14 @@ def normalize_mask_channels(
 
 
 def normalize_mask_dtype(mask: np.ndarray) -> np.ndarray:
-    """Convert mask to float32 [0.0, 1.0] from any common dtype."""
+    """Convert a mask to float32 in [0.0, 1.0] from any common dtype.
+
+    Args:
+        mask: Input mask array with dtype uint8, uint16, float32, or float64.
+
+    Returns:
+        float32 array with values in [0.0, 1.0].
+    """
     if mask.dtype == np.uint8:
         return mask.astype(np.float32) / 255.0
     elif mask.dtype == np.uint16:
@@ -102,13 +115,13 @@ def validate_frame_read(
     """Validate that a frame was read successfully.
 
     Args:
-        frame: The result of cv2.imread() - None if read failed.
-        clip_name: For error messages.
-        frame_index: For error messages.
+        frame: Result of cv2.imread() - None if the read failed.
+        clip_name: Clip name used in error messages.
+        frame_index: Frame index used in error messages.
         path: File path that was read.
 
     Returns:
-        The frame array (unchanged).
+        The frame array unchanged.
 
     Raises:
         FrameReadError: If frame is None.
@@ -128,8 +141,8 @@ def validate_write(
 
     Args:
         success: Return value of cv2.imwrite().
-        clip_name: For error messages.
-        frame_index: For error messages.
+        clip_name: Clip name used in error messages.
+        frame_index: Frame index used in error messages.
         path: File path that was written.
 
     Raises:
@@ -142,8 +155,12 @@ def validate_write(
 def ensure_output_dirs(clip_root: str) -> dict[str, str]:
     """Create output subdirectories for a clip and return their paths.
 
+    Args:
+        clip_root: Absolute path to the clip folder.
+
     Returns:
-        Dict with keys: 'root', 'fg', 'matte', 'comp', 'processed'
+        Dict with keys 'root', 'fg', 'matte', 'comp', 'processed' mapping
+        to absolute directory paths.
     """
     out_root = os.path.join(clip_root, "Output")
     dirs = {

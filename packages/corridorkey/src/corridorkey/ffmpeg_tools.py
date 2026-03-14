@@ -1,11 +1,12 @@
 """FFmpeg subprocess wrapper for video extraction and stitching.
 
-Pure Python, no Qt deps. Provides:
-- find_ffmpeg() / find_ffprobe() - locate binaries
-- probe_video() - get fps, resolution, frame count, codec
-- extract_frames() - video -> image sequence (PNG)
-- stitch_video() - image sequence -> video (H.264)
-- write/read_video_metadata() - sidecar JSON for roundtrip fidelity
+Pure Python, no Qt dependencies. Provides:
+
+- find_ffmpeg / find_ffprobe: locate binaries
+- probe_video: get fps, resolution, frame count, codec
+- extract_frames: video to image sequence (PNG)
+- stitch_video: image sequence to video (H.264)
+- write_video_metadata / read_video_metadata: sidecar JSON for roundtrip fidelity
 """
 
 from __future__ import annotations
@@ -22,9 +23,10 @@ from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
+# Filename used for the video metadata sidecar JSON.
 _METADATA_FILENAME = ".video_metadata.json"
 
-# Common install locations on Windows
+# Common FFmpeg install locations on Windows.
 _FFMPEG_SEARCH_PATHS = [
     r"C:\Program Files\ffmpeg\bin",
     r"C:\Program Files (x86)\ffmpeg\bin",
@@ -33,7 +35,13 @@ _FFMPEG_SEARCH_PATHS = [
 
 
 def find_ffmpeg() -> str | None:
-    """Locate ffmpeg binary. Checks PATH then common install dirs."""
+    """Locate the ffmpeg binary.
+
+    Checks PATH first, then common Windows install directories.
+
+    Returns:
+        Absolute path to ffmpeg, or None if not found.
+    """
     found = shutil.which("ffmpeg")
     if found:
         return found
@@ -45,7 +53,13 @@ def find_ffmpeg() -> str | None:
 
 
 def find_ffprobe() -> str | None:
-    """Locate ffprobe binary. Checks PATH then common install dirs."""
+    """Locate the ffprobe binary.
+
+    Checks PATH first, then common Windows install directories.
+
+    Returns:
+        Absolute path to ffprobe, or None if not found.
+    """
     found = shutil.which("ffprobe")
     if found:
         return found
@@ -57,11 +71,17 @@ def find_ffprobe() -> str | None:
 
 
 def probe_video(path: str) -> dict:
-    """Probe a video file for metadata.
+    """Probe a video file for metadata using ffprobe.
 
-    Returns dict with keys: fps (float), width (int), height (int),
-    frame_count (int), codec (str), duration (float).
-    Raises RuntimeError if ffprobe fails.
+    Args:
+        path: Path to the video file.
+
+    Returns:
+        Dict with keys: fps (float), width (int), height (int),
+        frame_count (int), codec (str), duration (float).
+
+    Raises:
+        RuntimeError: If ffprobe is not found or the probe fails.
     """
     ffprobe = find_ffprobe()
     if not ffprobe:
@@ -90,7 +110,6 @@ def probe_video(path: str) -> dict:
 
     data = json.loads(result.stdout)
 
-    # Find first video stream
     video_stream = None
     for stream in data.get("streams", []):
         if stream.get("codec_type") == "video":
@@ -100,7 +119,6 @@ def probe_video(path: str) -> dict:
     if not video_stream:
         raise RuntimeError(f"No video stream found in {path}")
 
-    # Parse fps from r_frame_rate (e.g. "24000/1001")
     fps_str = video_stream.get("r_frame_rate", "24/1")
     if "/" in fps_str:
         num, den = fps_str.split("/")
@@ -108,7 +126,6 @@ def probe_video(path: str) -> dict:
     else:
         fps = float(fps_str)
 
-    # Frame count: prefer nb_frames, fall back to duration * fps
     frame_count = 0
     if "nb_frames" in video_stream:
         with contextlib.suppress(ValueError, TypeError):
@@ -137,21 +154,24 @@ def extract_frames(
     cancel_event: threading.Event | None = None,
     total_frames: int = 0,
 ) -> int:
-    """Extract video frames to PNG image sequence.
+    """Extract video frames to a PNG image sequence.
+
+    Supports resuming: existing frames are detected and the last few are
+    re-extracted (conservative rollback) to guard against partial writes.
 
     Args:
-        video_path: Path to input video file.
+        video_path: Path to the input video file.
         out_dir: Directory to write frames into (created if needed).
-        pattern: Frame filename pattern (FFmpeg style).
+        pattern: Frame filename pattern in FFmpeg style.
         on_progress: Callback(current_frame, total_frames).
-        cancel_event: Set to cancel extraction.
-        total_frames: Expected total (for progress). Probed if 0.
+        cancel_event: Set this event to cancel extraction.
+        total_frames: Expected total frame count. Probed automatically when 0.
 
     Returns:
-        Number of frames extracted.
+        Number of frames present in out_dir after extraction.
 
     Raises:
-        RuntimeError if ffmpeg is not found or extraction fails.
+        RuntimeError: If ffmpeg is not found or extraction fails.
     """
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
@@ -159,7 +179,6 @@ def extract_frames(
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # Probe for total if not provided
     video_info = None
     if total_frames <= 0:
         try:
@@ -168,25 +187,24 @@ def extract_frames(
         except Exception:
             total_frames = 0
 
-    # Resume: detect existing frames and skip ahead with conservative rollback.
-    # Delete the last few frames (may be corrupt from mid-write or FFmpeg
-    # output buffering) and re-extract from that point.
-    _resume_rollback = 3  # frames to re-extract for safety
+    # Number of frames to re-extract at the resume boundary for safety.
+    _resume_rollback = 3
     start_frame = 0
     existing = sorted([f for f in os.listdir(out_dir) if f.lower().endswith(".png")])
     if existing:
-        # Remove the last N frames - they may be corrupt or incomplete
         remove_count = min(_resume_rollback, len(existing))
         for fname in existing[-remove_count:]:
             os.remove(os.path.join(out_dir, fname))
         start_frame = max(0, len(existing) - remove_count)
         if start_frame > 0:
             logger.info(
-                f"Resuming extraction from frame {start_frame} ({len(existing)} existed, rolled back {remove_count})"
+                "Resuming extraction from frame %d (%d existed, rolled back %d)",
+                start_frame,
+                len(existing),
+                remove_count,
             )
 
     if start_frame > 0 and total_frames > 0:
-        # Seek to the resume point
         if video_info is None:
             video_info = probe_video(video_path)
         fps = video_info.get("fps", 24.0)
@@ -217,7 +235,7 @@ def extract_frames(
             "-y",
         ]
 
-    logger.info(f"Extracting frames: {video_path} -> {out_dir} (start_frame={start_frame})")
+    logger.info("Extracting frames: %s -> %s (start_frame=%d)", video_path, out_dir, start_frame)
 
     proc = subprocess.Popen(
         cmd,
@@ -231,22 +249,20 @@ def extract_frames(
     last_frame = start_frame
     frame_re = re.compile(r"frame=\s*(\d+)")
 
-    # Read stderr in a background thread so cancel checks aren't blocked
     import queue as _queue
 
     line_q: _queue.Queue[str | None] = _queue.Queue()
 
-    def _reader():
+    def _reader() -> None:
         for ln in proc.stderr:
             line_q.put(ln)
-        line_q.put(None)  # sentinel
+        line_q.put(None)
 
     reader_thread = threading.Thread(target=_reader, daemon=True)
     reader_thread.start()
 
     try:
         while True:
-            # Check cancellation every 0.2s even if no output
             if cancel_event and cancel_event.is_set():
                 proc.kill()
                 with contextlib.suppress(subprocess.TimeoutExpired):
@@ -257,13 +273,12 @@ def extract_frames(
             try:
                 line = line_q.get(timeout=0.2)
             except _queue.Empty:
-                # No output yet - check if process is still alive
                 if proc.poll() is not None:
                     break
                 continue
 
             if line is None:
-                break  # stderr closed - process ending
+                break
 
             match = frame_re.search(line)
             if match:
@@ -279,9 +294,8 @@ def extract_frames(
     if proc.returncode != 0 and not (cancel_event and cancel_event.is_set()):
         raise RuntimeError(f"FFmpeg extraction failed with code {proc.returncode}")
 
-    # Count actual extracted frames
     extracted = len([f for f in os.listdir(out_dir) if f.lower().endswith(".png")])
-    logger.info(f"Extracted {extracted} frames to {out_dir}")
+    logger.info("Extracted %d frames to %s", extracted, out_dir)
     return extracted
 
 
@@ -295,26 +309,25 @@ def stitch_video(
     on_progress: Callable[[int, int], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> None:
-    """Stitch image sequence back into a video file.
+    """Stitch an image sequence back into a video file.
 
     Args:
         in_dir: Directory containing frame images.
         out_path: Output video file path.
         fps: Frame rate.
-        pattern: Frame filename pattern.
+        pattern: Frame filename pattern in FFmpeg style.
         codec: Video codec (libx264, libx265, etc.).
-        crf: Quality (0-51, lower = better).
+        crf: Quality factor (0-51, lower is better).
         on_progress: Callback(current_frame, total_frames).
-        cancel_event: Set to cancel stitching.
+        cancel_event: Set this event to cancel stitching.
 
     Raises:
-        RuntimeError if ffmpeg is not found or stitching fails.
+        RuntimeError: If ffmpeg is not found or stitching fails.
     """
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise RuntimeError("ffmpeg not found")
 
-    # Count total frames
     total_frames = len([f for f in os.listdir(in_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".exr"))])
 
     cmd = [
@@ -335,7 +348,7 @@ def stitch_video(
         "-y",
     ]
 
-    logger.info(f"Stitching video: {in_dir} -> {out_path}")
+    logger.info("Stitching video: %s -> %s", in_dir, out_path)
 
     proc = subprocess.Popen(
         cmd,
@@ -374,23 +387,34 @@ def stitch_video(
     if proc.returncode != 0 and not (cancel_event and cancel_event.is_set()):
         raise RuntimeError(f"FFmpeg stitching failed with code {proc.returncode}")
 
-    logger.info(f"Video stitched: {out_path}")
+    logger.info("Video stitched: %s", out_path)
 
 
 def write_video_metadata(clip_root: str, metadata: dict) -> None:
-    """Write video metadata sidecar JSON to clip root.
+    """Write a video metadata sidecar JSON to the clip root.
 
     Metadata typically includes: source_path, fps, width, height,
     frame_count, codec, duration.
+
+    Args:
+        clip_root: Absolute path to the clip folder.
+        metadata: Dict to serialise as JSON.
     """
     path = os.path.join(clip_root, _METADATA_FILENAME)
     with open(path, "w") as f:
         json.dump(metadata, f, indent=2)
-    logger.debug(f"Video metadata written: {path}")
+    logger.debug("Video metadata written: %s", path)
 
 
 def read_video_metadata(clip_root: str) -> dict | None:
-    """Read video metadata sidecar from clip root. Returns None if not found."""
+    """Read the video metadata sidecar from the clip root.
+
+    Args:
+        clip_root: Absolute path to the clip folder.
+
+    Returns:
+        Parsed metadata dict, or None if the sidecar does not exist.
+    """
     path = os.path.join(clip_root, _METADATA_FILENAME)
     if not os.path.isfile(path):
         return None
@@ -398,5 +422,5 @@ def read_video_metadata(clip_root: str) -> dict | None:
         with open(path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.debug(f"Failed to read video metadata: {e}")
+        logger.debug("Failed to read video metadata: %s", e)
         return None

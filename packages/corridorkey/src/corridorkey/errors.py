@@ -1,10 +1,14 @@
-"""Typed exceptions for the CorridorKey backend."""
+"""Typed exceptions for the CorridorKey pipeline.
+
+All exceptions inherit from CorridorKeyError so callers can catch the
+base class when they don't need to distinguish between subtypes.
+"""
 
 import sys
 
 
 class CorridorKeyError(Exception):
-    """Base exception for all CorridorKey backend errors."""
+    """Base exception for all CorridorKey errors."""
 
     pass
 
@@ -16,7 +20,7 @@ class ClipScanError(CorridorKeyError):
 
 
 class FrameMismatchError(CorridorKeyError):
-    """Raised when input and alpha frame counts don't match."""
+    """Raised when input and alpha frame counts do not match."""
 
     def __init__(self, clip_name: str, input_count: int, alpha_count: int):
         self.clip_name = clip_name
@@ -36,7 +40,7 @@ class FrameReadError(CorridorKeyError):
 
 
 class WriteFailureError(CorridorKeyError):
-    """Raised when cv2.imwrite or similar write operation fails."""
+    """Raised when a write operation fails."""
 
     def __init__(self, clip_name: str, frame_index: int, path: str):
         self.clip_name = clip_name
@@ -46,7 +50,7 @@ class WriteFailureError(CorridorKeyError):
 
 
 class MaskChannelError(CorridorKeyError):
-    """Raised when a mask has unexpected channel count that can't be resolved."""
+    """Raised when a mask has an unexpected channel count."""
 
     def __init__(self, clip_name: str, frame_index: int, channels: int):
         self.clip_name = clip_name
@@ -56,7 +60,7 @@ class MaskChannelError(CorridorKeyError):
 
 
 class VRAMInsufficientError(CorridorKeyError):
-    """Raised when there isn't enough GPU VRAM for the requested operation."""
+    """Raised when there is not enough GPU VRAM for the requested operation."""
 
     def __init__(self, required_gb: float, available_gb: float):
         self.required_gb = required_gb
