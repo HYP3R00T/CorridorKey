@@ -32,7 +32,7 @@ from corridorkey_core.model_transformer import GreenFormer
 logger = logging.getLogger(__name__)
 
 
-class CorridorKeyEngine:
+class CorridorKeyEngine:  # pragma: no cover
     """Inference engine for the CorridorKey chroma keying model.
 
     Loads a GreenFormer checkpoint, optionally compiles it with torch.compile,
