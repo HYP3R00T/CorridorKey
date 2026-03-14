@@ -3,7 +3,7 @@ name = "corridorkey-workspace"
 version = "2.0.0"
 description = "AI Green Screen Keyer by Corridor Digital"
 license = { text = "CC-BY-NC-SA-4.0" }
-requires-python = ">=3.13"
+requires-python = ">=3.13, <3.14"
 readme = "README.md"
 authors = [{ name = "Corridor Digital" }]
 maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]

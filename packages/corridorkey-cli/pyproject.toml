@@ -2,7 +2,7 @@
 name = "corridorkey-cli"
 version = "0.1.0"
 description = "Command-line interface for the CorridorKey AI chroma keying pipeline."
-requires-python = ">=3.13"
+requires-python = ">=3.13, <3.14"
 readme = "README.md"
 authors = [{ name = "Corridor Digital" }]
 maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
