@@ -1,3 +1,10 @@
+"""Image compositing utilities for the CorridorKey keying pipeline.
+
+Provides color space conversion (linear/sRGB), alpha compositing, green spill
+removal, matte cleanup, and preview generation. All functions support both
+numpy arrays and PyTorch tensors unless otherwise noted.
+"""
+
 from __future__ import annotations
 
 import functools
@@ -17,9 +24,7 @@ def _if_tensor(is_tensor: bool, tensor_func: Callable, numpy_func: Callable) -> 
 
 
 def _power(x: np.ndarray | torch.Tensor, exponent: float) -> np.ndarray | torch.Tensor:
-    """
-    Power function that supports both Numpy arrays and PyTorch tensors.
-    """
+    # Dispatches to torch.pow or np.power depending on input type.
     power = _if_tensor(_is_tensor(x), torch.pow, np.power)
     return power(x, exponent)
 
@@ -27,17 +32,13 @@ def _power(x: np.ndarray | torch.Tensor, exponent: float) -> np.ndarray | torch.
 def _where(
     condition: np.ndarray | torch.Tensor, x: np.ndarray | torch.Tensor, y: np.ndarray | torch.Tensor
 ) -> np.ndarray | torch.Tensor:
-    """
-    Where function that supports both Numpy arrays and PyTorch tensors.
-    """
+    # Dispatches to torch.where or np.where depending on input type.
     where = _if_tensor(_is_tensor(x), torch.where, np.where)
     return where(condition, x, y)
 
 
 def _clamp(x: np.ndarray | torch.Tensor, min: float) -> np.ndarray | torch.Tensor:
-    """
-    Clamp function that supports both Numpy arrays and PyTorch tensors.
-    """
+    # Clamps values to a minimum of 0.0. Dispatches to torch or numpy.
     if isinstance(x, torch.Tensor):
         return x.clamp(min=0.0)
     return np.clip(x, 0.0, None)
@@ -63,9 +64,9 @@ _SRGB_BETA = 0.055
 
 
 def linear_to_srgb(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
-    """
-    Converts Linear to sRGB using the official piecewise sRGB transfer function.
-    Supports both Numpy arrays and PyTorch tensors.
+    """Convert linear light values to sRGB using the IEC 61966-2-1 piecewise transfer function.
+
+    Supports both numpy arrays and PyTorch tensors. Values below zero are clamped.
     """
     x = _clamp(x, 0.0)
     mask = x <= _SRGB_LINEAR_THRESHOLD
@@ -73,9 +74,9 @@ def linear_to_srgb(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
 
 
 def srgb_to_linear(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
-    """
-    Converts sRGB to Linear using the official piecewise sRGB transfer function.
-    Supports both Numpy arrays and PyTorch tensors.
+    """Convert sRGB encoded values to linear light using the IEC 61966-2-1 piecewise transfer function.
+
+    Supports both numpy arrays and PyTorch tensors. Values below zero are clamped.
     """
     x = _clamp(x, 0.0)
     mask = x <= _SRGB_ENCODED_THRESHOLD
@@ -83,10 +84,11 @@ def srgb_to_linear(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
 
 
 def premultiply(fg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
-    """
-    Premultiplies foreground by alpha.
-    fg: Color [..., C] or [C, ...]
-    alpha: Alpha [..., 1] or [1, ...]
+    """Multiply foreground color by alpha to produce a premultiplied image.
+
+    Args:
+        fg: Color array with shape [..., C] or [C, ...].
+        alpha: Alpha array with shape [..., 1] or [1, ...].
     """
     return fg * alpha
 
@@ -94,8 +96,8 @@ def premultiply(fg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor)
 def composite_straight(
     fg: np.ndarray | torch.Tensor, bg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor
 ) -> np.ndarray | torch.Tensor:
-    """
-    Composites Straight FG over BG.
+    """Composite a straight (unpremultiplied) foreground over a background.
+
     Formula: FG * Alpha + BG * (1 - Alpha)
     """
     return fg * alpha + bg * (1.0 - alpha)
@@ -104,8 +106,8 @@ def composite_straight(
 def composite_premul(
     fg: np.ndarray | torch.Tensor, bg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor
 ) -> np.ndarray | torch.Tensor:
-    """
-    Composites Premultiplied FG over BG.
+    """Composite a premultiplied foreground over a background.
+
     Formula: FG + BG * (1 - Alpha)
     """
     return fg + bg * (1.0 - alpha)
@@ -114,11 +116,16 @@ def composite_premul(
 def despill(
     image: np.ndarray | torch.Tensor, green_limit_mode: str = "average", strength: float = 1.0
 ) -> np.ndarray | torch.Tensor:
-    """
-    Removes green spill from an RGB image using a luminance-preserving method.
-    image: RGB float (0-1).
-    green_limit_mode: 'average' ((R+B)/2) or 'max' (max(R, B)).
-    strength: 0.0 to 1.0 multiplier for the despill effect.
+    """Remove green spill from an RGB image using a luminance-preserving method.
+
+    Excess green is redistributed equally to red and blue channels to neutralize
+    the spill without darkening the subject.
+
+    Args:
+        image: RGB float array in range 0-1.
+        green_limit_mode: How to compute the green limit. "average" uses (R+B)/2,
+            "max" uses max(R, B).
+        strength: Blend factor between original and despilled result (0.0 to 1.0).
     """
     if strength <= 0.0:
         return image
@@ -134,11 +141,9 @@ def despill(
     limit = _maximum(r, b) if green_limit_mode == "max" else (r + b) / 2.0
 
     if isinstance(image, torch.Tensor):
-        # PyTorch Impl — g/limit are Tensor since image is Tensor
         diff: torch.Tensor = g - limit  # type: ignore[assignment]
         spill_amount = torch.clamp(diff, min=0.0)
     else:
-        # Numpy Impl
         spill_amount = np.maximum(g - limit, 0.0)
 
     g_new = g - spill_amount
@@ -154,45 +159,50 @@ def despill(
 
 
 def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int = 15, blur_size: int = 5) -> np.ndarray:
+    """Remove small disconnected regions from a predicted alpha matte.
+
+    Useful for eliminating tracking markers, noise islands, or other small
+    artifacts that the model incorrectly classified as foreground.
+
+    Args:
+        alpha_np: Float array with shape [H, W] or [H, W, 1] in range 0.0-1.0.
+        area_threshold: Minimum pixel area for a connected component to be kept.
+        dilation: Radius in pixels to dilate the cleaned mask before blending.
+        blur_size: Radius in pixels for Gaussian blur applied after dilation.
     """
-    Cleans up small disconnected components (like tracking markers) from a predicted alpha matte.
-    alpha_np: Numpy array [H, W] or [H, W, 1] float (0.0 - 1.0)
-    """
-    # Needs to be 2D
+    # Needs to be 2D for connected components analysis
     is_3d = False
     if alpha_np.ndim == 3:
         is_3d = True
         alpha_np = alpha_np[:, :, 0]
 
-    # Threshold to binary
+    # Binarize at 0.5 to get a uint8 mask for OpenCV
     mask_8u = (alpha_np > 0.5).astype(np.uint8) * 255
 
-    # Find connected components
+    # Label each connected foreground region
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_8u, connectivity=8)
 
-    # Create an empty mask for the cleaned components
     cleaned_mask = np.zeros_like(mask_8u)
 
-    # Keep components larger than the threshold (skip label 0, which is background)
+    # Keep regions above the area threshold; label 0 is background and is always skipped
     for i in range(1, num_labels):
         if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
             cleaned_mask[labels == i] = 255
 
-    # Dilate
+    # Dilate to recover edges lost during binarization
     if dilation > 0:
         kernel_size = int(dilation * 2 + 1)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
         cleaned_mask = cv2.dilate(cleaned_mask, kernel)
 
-    # Blur
+    # Blur to soften the hard edges of the cleaned mask
     if blur_size > 0:
         b_size = int(blur_size * 2 + 1)
         cleaned_mask = cv2.GaussianBlur(cleaned_mask, (b_size, b_size), 0)
 
-    # Convert back to 0-1 float
     safe_zone = cleaned_mask.astype(np.float32) / 255.0
 
-    # Multiply original alpha by the safe zone
+    # Multiply the original soft alpha by the safe zone to zero out removed regions
     result_alpha = alpha_np * safe_zone
 
     if is_3d:
@@ -204,26 +214,32 @@ def clean_matte(alpha_np: np.ndarray, area_threshold: int = 300, dilation: int =
 def create_checkerboard(
     width: int, height: int, checker_size: int = 64, color1: float = 0.2, color2: float = 0.4
 ) -> np.ndarray:
+    """Create a grayscale checkerboard pattern for compositing previews.
+
+    Values are in linear light (not gamma-encoded). Convert with srgb_to_linear
+    before use if your pipeline expects linear input.
+
+    Args:
+        width: Output width in pixels.
+        height: Output height in pixels.
+        checker_size: Side length of each checker tile in pixels.
+        color1: Linear brightness of the dark tiles (0.0-1.0).
+        color2: Linear brightness of the light tiles (0.0-1.0).
+
+    Returns:
+        Float array with shape [H, W, 3] in range 0.0-1.0.
     """
-    Creates a linear grayscale checkerboard pattern.
-    Returns: Numpy array [H, W, 3] float (0.0-1.0)
-    """
-    # Create coordinate grids
     x = np.arange(width)
     y = np.arange(height)
 
-    # Determine tile parity
     x_tiles = x // checker_size
     y_tiles = y // checker_size
 
-    # Broadcast to 2D
     x_grid, y_grid = np.meshgrid(x_tiles, y_tiles)
 
-    # XOR for checker pattern (1 if odd, 0 if even)
+    # Even sum = color1, odd sum = color2
     checker = (x_grid + y_grid) % 2
 
-    # Map 0 to color1 and 1 to color2
     bg_img = np.where(checker == 0, color1, color2).astype(np.float32)
 
-    # Make it 3-channel
     return np.stack([bg_img, bg_img, bg_img], axis=-1)

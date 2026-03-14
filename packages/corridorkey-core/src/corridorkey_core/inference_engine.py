@@ -1,3 +1,10 @@
+"""Runtime inference engine for the CorridorKey chroma keying model.
+
+Wraps GreenFormer with checkpoint loading, optional torch.compile, and a
+full per-frame processing pipeline including preprocessing, inference,
+despilling, matte cleanup, and compositing.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -26,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 
 class CorridorKeyEngine:
+    """Inference engine for the CorridorKey chroma keying model.
+
+    Loads a GreenFormer checkpoint, optionally compiles it with torch.compile,
+    and exposes process_frame for per-frame alpha matte prediction.
+    """
+
     def __init__(
         self,
         checkpoint_path: str,
@@ -35,6 +48,16 @@ class CorridorKeyEngine:
         mixed_precision: bool = True,
         model_precision: torch.dtype = torch.float32,
     ) -> None:
+        """Initialize the engine and load the model from a checkpoint.
+
+        Args:
+            checkpoint_path: Path to the .pt or .pth checkpoint file.
+            device: Torch device string, e.g. "cpu", "cuda", "cuda:0".
+            img_size: Square resolution the model runs at internally.
+            use_refiner: Whether to enable the CNN refiner module.
+            mixed_precision: Whether to run inference in fp16 autocast.
+            model_precision: Weight dtype for the model (float32 or float16).
+        """
         self.device = torch.device(device)
         self.img_size = img_size
         self.checkpoint_path = checkpoint_path
@@ -44,26 +67,24 @@ class CorridorKeyEngine:
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
         if mixed_precision or model_precision != torch.float32:
-            # Use faster matrix multiplication implementation
-            # This reduces the floating point precision a little bit,
-            # but it should be negligible compared to fp16 precision
+            # Faster matmul at the cost of slightly reduced float32 precision,
+            # negligible compared to fp16 quantization error.
             torch.set_float32_matmul_precision("high")
 
         self.mixed_precision = mixed_precision
         if mixed_precision and model_precision == torch.float16:
-            # using mixed precision, when the precision is already fp16, is slower
+            # Autocast to fp16 on top of fp16 weights adds overhead with no benefit.
             self.mixed_precision = False
 
         self.model_precision = model_precision
 
         model = self._load_model().to(model_precision)
 
-        # We only tested compilation on windows and linux. For other platforms compilation is disabled as a precaution.
+        # torch.compile is only tested on Linux and Windows; skip on other platforms.
         if sys.platform == "linux" or sys.platform == "win32":
-            # Try compiling the model. Fallback to eager mode if it fails.
             try:
                 self.model = torch.compile(model)
-                # Trigger compilation with a dummy input
+                # Warm up the compiled model to trigger JIT compilation now rather than on the first real frame.
                 dummy_input = torch.zeros(1, 4, img_size, img_size, dtype=model_precision, device=self.device)
                 with torch.inference_mode():
                     self.model(dummy_input)
@@ -74,22 +95,26 @@ class CorridorKeyEngine:
                 self.model = model
 
     def _load_model(self) -> GreenFormer:
+        """Load and return a GreenFormer model from the configured checkpoint path.
+
+        Handles the _orig_mod. prefix left by torch.compile and resizes positional
+        embeddings when the checkpoint resolution differs from img_size.
+        """
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
-        # Initialize Model (Hiera Backbone)
         model = GreenFormer(
             encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
         )
         model = model.to(self.device)
         model.eval()
 
-        # Load Weights
         if not os.path.isfile(self.checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {self.checkpoint_path}")
 
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=True)
         state_dict = checkpoint.get("state_dict", checkpoint)
 
-        # Fix Compiled Model Prefix & Handle PosEmbed Mismatch
+        # Strip the _orig_mod. prefix that torch.compile adds to state dict keys.
+        # Also resize positional embeddings when the checkpoint was trained at a different resolution.
         new_state_dict = {}
         model_state = model.state_dict()
 
@@ -97,12 +122,9 @@ class CorridorKeyEngine:
             if k.startswith("_orig_mod."):
                 k = k[10:]
 
-            # Check for PosEmbed Mismatch
             if "pos_embed" in k and k in model_state and v.shape != model_state[k].shape:
                 print(f"Resizing {k} from {v.shape} to {model_state[k].shape}")
-                # v: [1, n_src, c]
-                # target: [1, n_dst, c]
-                # We assume square grid
+                # Treat the sequence dimension as a square spatial grid and bicubic-interpolate.
                 n_src = v.shape[1]
                 n_dst = model_state[k].shape[1]
                 c = v.shape[2]
@@ -110,15 +132,10 @@ class CorridorKeyEngine:
                 grid_src = int(math.sqrt(n_src))
                 grid_dst = int(math.sqrt(n_dst))
 
-                # Reshape to [1, c, H, W]
                 v_img = v.permute(0, 2, 1).view(1, c, grid_src, grid_src)
-
-                # Interpolate
                 v_resized = functional.interpolate(
                     v_img, size=(grid_dst, grid_dst), mode="bicubic", align_corners=False
                 )
-
-                # Reshape back
                 v = v_resized.flatten(2).transpose(1, 2)
 
             new_state_dict[k] = v
@@ -143,25 +160,32 @@ class CorridorKeyEngine:
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
     ) -> dict[str, np.ndarray]:
-        """
-        Process a single frame.
+        """Run the full keying pipeline on a single frame.
+
         Args:
-            image: Numpy array [H, W, 3] (0.0-1.0 or 0-255).
-                   - If input_is_linear=False (Default): Assumed sRGB.
-                   - If input_is_linear=True: Assumed Linear.
-            mask_linear: Numpy array [H, W] or [H, W, 1] (0.0-1.0). Assumed Linear.
-            refiner_scale: Multiplier for Refiner Deltas (default 1.0).
-            input_is_linear: bool. If True, resizes in Linear then transforms to sRGB.
-                             If False, resizes in sRGB (standard).
-            fg_is_straight: bool. If True, assumes FG output is Straight (unpremultiplied).
-                            If False, assumes FG output is Premultiplied.
-            despill_strength: float. 0.0 to 1.0 multiplier for the despill effect.
-            auto_despeckle: bool. If True, cleans up small disconnected components from the predicted alpha matte.
-            despeckle_size: int. Minimum number of consecutive pixels required to keep an island.
+            image: RGB float array [H, W, 3] in range 0.0-1.0 or uint8 0-255.
+                Assumed sRGB unless input_is_linear is True.
+            mask_linear: Grayscale float array [H, W] or [H, W, 1] in range 0.0-1.0.
+                Always assumed to be linear.
+            refiner_scale: Multiplier applied to the CNN refiner output deltas.
+                Values above 1.0 strengthen refinement, below 1.0 weaken it.
+            input_is_linear: If True, the image is treated as linear light and
+                converted to sRGB before being passed to the model.
+            fg_is_straight: If True, the foreground output is treated as straight
+                (unpremultiplied) during compositing.
+            despill_strength: Blend factor for the despill effect (0.0 to 1.0).
+            auto_despeckle: If True, removes small disconnected foreground islands
+                from the predicted alpha matte.
+            despeckle_size: Minimum pixel area for a foreground island to be kept
+                when auto_despeckle is enabled.
+
         Returns:
-             dict: {'alpha': np, 'fg': np (sRGB), 'comp': np (sRGB on Gray)}
+            A dict with four keys:
+                "alpha": Raw predicted alpha [H, W, 1], linear float.
+                "fg": Raw predicted foreground [H, W, 3], sRGB straight float.
+                "comp": Preview composite over checkerboard [H, W, 3], sRGB float.
+                "processed": Final RGBA [H, W, 4], linear premultiplied float.
         """
-        # 1. Inputs Check & Normalization
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
 
@@ -170,20 +194,16 @@ class CorridorKeyEngine:
 
         h, w = image.shape[:2]
 
-        # Ensure Mask Shape
         if mask_linear.ndim == 2:
             mask_linear = mask_linear[:, :, np.newaxis]
 
-        # 2. Resize to Model Size
-        # If input is linear, we resize in linear to preserve energy/highlights,
-        # THEN convert to sRGB for the model.
+        # Resize to the model's internal resolution.
+        # When the input is linear, resize before converting to sRGB to preserve
+        # energy in highlights during downsampling.
         if input_is_linear:
-            # Resize in Linear
             img_resized_lin = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
-            # Convert to sRGB for Model
             img_resized = linear_to_srgb(img_resized_lin)
         else:
-            # Standard sRGB Resize
             img_resized = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
         mask_resized = cv2.resize(mask_linear, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
@@ -191,16 +211,14 @@ class CorridorKeyEngine:
         if mask_resized.ndim == 2:
             mask_resized = mask_resized[:, :, np.newaxis]
 
-        # 3. Normalize (ImageNet)
-        # Model expects sRGB input normalized
+        # Normalize with ImageNet mean and std, which the Hiera encoder was pretrained with.
         img_norm = (img_resized - self.mean) / self.std
 
-        # 4. Prepare Tensor
-        inp_np = np.concatenate([img_norm, mask_resized], axis=-1)  # [H, W, 4]
+        # Stack image and mask into a single [B, 4, H, W] tensor.
+        inp_np = np.concatenate([img_norm, mask_resized], axis=-1)
         inp_t = torch.from_numpy(inp_np.transpose((2, 0, 1))).unsqueeze(0).to(self.model_precision).to(self.device)
 
-        # 5. Inference
-        # Hook for Refiner Scaling
+        # Optionally scale the refiner's delta output via a forward hook.
         handle = None
         if refiner_scale != 1.0 and self.model.refiner is not None:  # ty:ignore[unresolved-attribute]
 
@@ -216,10 +234,10 @@ class CorridorKeyEngine:
             handle.remove()
 
         pred_alpha = out["alpha"]
-        pred_fg = out["fg"]  # Output is sRGB (Sigmoid)
+        pred_fg = out["fg"]
 
-        # 6. Post-Process (Resize Back to Original Resolution)
-        # We use Lanczos4 for high-quality resampling to minimize blur when going back to 4K/Original.
+        # Resize predictions back to the original frame resolution.
+        # Lanczos4 minimises blur when upscaling back to 4K.
         res_alpha = pred_alpha[0].permute(1, 2, 0).float().cpu().numpy()
         res_fg = pred_fg[0].permute(1, 2, 0).float().cpu().numpy()
         res_alpha = cv2.resize(res_alpha, (w, h), interpolation=cv2.INTER_LANCZOS4)
@@ -228,46 +246,37 @@ class CorridorKeyEngine:
         if res_alpha.ndim == 2:
             res_alpha = res_alpha[:, :, np.newaxis]
 
-        # --- ADVANCED COMPOSITING ---
-
-        # A. Clean Matte (Auto-Despeckle)
+        # Remove small foreground islands (tracking markers, noise) from the matte.
         if auto_despeckle:
             processed_alpha = clean_matte(res_alpha, area_threshold=despeckle_size, dilation=25, blur_size=5)
         else:
             processed_alpha = res_alpha
 
-        # B. Despill FG
-        # res_fg is sRGB.
+        # Remove green spill from the foreground (still in sRGB at this point).
         fg_despilled = despill(res_fg, green_limit_mode="average", strength=despill_strength)
 
-        # C. Premultiply (for EXR Output)
-        # CONVERT TO LINEAR FIRST! EXRs must house linear color premultiplied by linear alpha.
+        # Convert to linear and premultiply for EXR output.
+        # EXR files must store linear, premultiplied color.
         fg_despilled_lin = srgb_to_linear(fg_despilled)
         fg_premul_lin = premultiply(fg_despilled_lin, processed_alpha)
 
-        # D. Pack RGBA
-        # [H, W, 4] - All channels are now strictly Linear Float
+        # Pack the final linear premultiplied RGBA.
         processed_rgba = np.concatenate([fg_premul_lin, processed_alpha], axis=-1)
 
-        # ----------------------------
-
-        # 7. Composite (on Checkerboard) for checking
-        # Generate Dark/Light Gray Checkerboard (in sRGB, convert to Linear)
+        # Build a checkerboard preview composite in linear light, then convert to sRGB for display.
         bg_srgb = create_checkerboard(w, h, checker_size=128, color1=0.15, color2=0.55)
         bg_lin = srgb_to_linear(bg_srgb)
 
         if fg_is_straight:
             comp_lin = composite_straight(fg_despilled_lin, bg_lin, processed_alpha)
         else:
-            # If premultiplied model, we shouldn't multiply again (though our pipeline forces straight)
             comp_lin = composite_premul(fg_despilled_lin, bg_lin, processed_alpha)
 
         comp_srgb = linear_to_srgb(comp_lin)
 
-        # * returns ndarray|Tensor but inputs are always ndarray here
         return {
-            "alpha": res_alpha,  # Linear, Raw Prediction
-            "fg": res_fg,  # sRGB, Raw Prediction (Straight)
-            "comp": comp_srgb,  # sRGB, Composite
-            "processed": processed_rgba,  # Linear/Premul, RGBA, Garbage Matted & Despilled
+            "alpha": res_alpha,  # linear float, raw prediction
+            "fg": res_fg,  # sRGB float, straight (unpremultiplied)
+            "comp": comp_srgb,  # sRGB float, preview composite over checkerboard
+            "processed": processed_rgba,  # linear float, premultiplied RGBA
         }  # ty:ignore[invalid-return-type]
