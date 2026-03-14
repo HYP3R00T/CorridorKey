@@ -21,11 +21,30 @@ Unit tests are not appropriate for:
 
 One test file per source module, prefixed with `test_`.
 
+`corridorkey-core`:
+
 | Source module | Test file |
 |---|---|
 | `compositing.py` | `test_compositing.py` |
 | `engine_factory.py` | `test_engine_factory.py` |
 | `model_transformer.py` | `test_model_transformer.py` |
+
+`corridorkey`:
+
+| Source module | Test file |
+|---|---|
+| `clip_state.py` | `test_clip_state.py` |
+| `config.py` | `test_config.py` |
+| `errors.py` | `test_errors.py` |
+| `job_queue.py` | `test_job_queue.py` |
+| `models.py` | `test_models.py` |
+| `natural_sort.py` | `test_natural_sort.py` |
+| `pipeline.py` | `test_pipeline.py` |
+| `project.py` | `test_project.py` |
+| `protocols.py` | `test_protocols.py` |
+| `validators.py` | `test_validators.py` |
+
+Hardware-dependent modules (`service.py`, `ffmpeg_tools.py`, `frame_io.py`, `device_utils.py`) are not unit tested - see [Hardware-Gated Tests](hardware-gated.md).
 
 ## Class Grouping
 
