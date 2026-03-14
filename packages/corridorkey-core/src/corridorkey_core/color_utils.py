@@ -46,6 +46,17 @@ def _clamp(x: np.ndarray | torch.Tensor, min: float) -> np.ndarray | torch.Tenso
 _torch_stack = functools.partial(torch.stack, dim=-1)
 _numpy_stack = functools.partial(np.stack, axis=-1)
 
+# sRGB transfer function constants (IEC 61966-2-1)
+# Reference: https://www.color.org/chardata/rgb/srgb.xalter
+_SRGB_LINEAR_THRESHOLD = 0.0031308  # Linear values at or below this use the linear segment
+_SRGB_ENCODED_THRESHOLD = (
+    0.04045  # Encoded values at or below this use the linear segment (= _SRGB_LINEAR_THRESHOLD * 12.92)
+)
+_SRGB_LINEAR_SCALE = 12.92  # Slope of the linear segment
+_SRGB_GAMMA = 1.0 / 2.4  # Exponent for the power curve (encoding: linear -> sRGB)
+_SRGB_ALPHA = 1.055  # Scale factor for the power curve
+_SRGB_BETA = 0.055  # Offset for the power curve
+
 
 def linear_to_srgb(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """
@@ -53,8 +64,8 @@ def linear_to_srgb(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     Supports both Numpy arrays and PyTorch tensors.
     """
     x = _clamp(x, 0.0)
-    mask = x <= 0.0031308
-    return _where(mask, x * 12.92, 1.055 * _power(x, 1.0 / 2.4) - 0.055)
+    mask = x <= _SRGB_LINEAR_THRESHOLD
+    return _where(mask, x * _SRGB_LINEAR_SCALE, _SRGB_ALPHA * _power(x, _SRGB_GAMMA) - _SRGB_BETA)
 
 
 def srgb_to_linear(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
@@ -63,8 +74,8 @@ def srgb_to_linear(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     Supports both Numpy arrays and PyTorch tensors.
     """
     x = _clamp(x, 0.0)
-    mask = x <= 0.04045
-    return _where(mask, x / 12.92, _power((x + 0.055) / 1.055, 2.4))
+    mask = x <= _SRGB_ENCODED_THRESHOLD
+    return _where(mask, x / _SRGB_LINEAR_SCALE, _power((x + _SRGB_BETA) / _SRGB_ALPHA, 2.4))
 
 
 def premultiply(fg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
@@ -74,16 +85,6 @@ def premultiply(fg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor)
     alpha: Alpha [..., 1] or [1, ...]
     """
     return fg * alpha
-
-
-def unpremultiply(
-    fg: np.ndarray | torch.Tensor, alpha: np.ndarray | torch.Tensor, eps: float = 1e-6
-) -> np.ndarray | torch.Tensor:
-    """
-    Un-premultiplies foreground by alpha.
-    Ref: fg_straight = fg_premul / (alpha + eps)
-    """
-    return fg / (alpha + eps)
 
 
 def composite_straight(
@@ -104,102 +105,6 @@ def composite_premul(
     Formula: FG + BG * (1 - Alpha)
     """
     return fg + bg * (1.0 - alpha)
-
-
-def rgb_to_yuv(image: torch.Tensor) -> torch.Tensor:
-    """
-    Converts RGB to YUV (Rec. 601).
-    Input: [..., 3, H, W] or [..., 3] depending on layout.
-    Supports standard PyTorch BCHW.
-    """
-    if not _is_tensor(image):
-        raise TypeError("rgb_to_yuv only supports dict/tensor inputs currently")
-
-    # Weights for RGB -> Y
-    # Rec. 601: 0.299, 0.587, 0.114
-
-    # Assume BCHW layout if 4 dims
-    if image.dim() == 4:
-        r = image[:, 0:1, :, :]
-        g = image[:, 1:2, :, :]
-        b = image[:, 2:3, :, :]
-    elif image.dim() == 3 and image.shape[0] == 3:  # CHW
-        r = image[0:1, :, :]
-        g = image[1:2, :, :]
-        b = image[2:3, :, :]
-    else:
-        # Last dim conversion
-        r = image[..., 0]
-        g = image[..., 1]
-        b = image[..., 2]
-
-    y = 0.299 * r + 0.587 * g + 0.114 * b
-    u = 0.492 * (b - y)
-    v = 0.877 * (r - y)
-
-    if image.dim() >= 3 and image.shape[-3] == 3:  # Concatenate along Channel dim
-        return torch.cat([y, u, v], dim=-3)
-    else:
-        return torch.stack([y, u, v], dim=-1)
-
-
-def dilate_mask(mask: np.ndarray | torch.Tensor, radius: int) -> np.ndarray | torch.Tensor:
-    """
-    Dilates a mask by a given radius.
-    Supports Numpy (using cv2) and PyTorch (using MaxPool).
-    radius: Int (pixels). 0 = No change.
-    """
-    if radius <= 0:
-        return mask
-
-    kernel_size = int(radius * 2 + 1)
-
-    if isinstance(mask, torch.Tensor):
-        # PyTorch Dilation (using Max Pooling)
-        # Expects [B, C, H, W]
-        orig_dim = mask.dim()
-
-        if orig_dim == 2:
-            mask = mask.unsqueeze(0).unsqueeze(0)
-        elif orig_dim == 3:
-            mask = mask.unsqueeze(0)
-
-        padding = radius
-        dilated = torch.nn.functional.max_pool2d(mask, kernel_size, stride=1, padding=padding)
-
-        if orig_dim == 2:
-            return dilated.squeeze()
-        elif orig_dim == 3:
-            return dilated.squeeze(0)
-        return dilated
-
-    # Numpy Dilation (using OpenCV)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    return cv2.dilate(mask, kernel)
-
-
-def apply_garbage_matte(
-    predicted_matte: np.ndarray | torch.Tensor,
-    garbage_matte_input: np.ndarray | torch.Tensor | None,
-    dilation: int = 10,
-) -> np.ndarray | torch.Tensor:
-    """
-    Multiplies predicted matte by a dilated garbage matte to clean up background.
-    """
-    if garbage_matte_input is None:
-        return predicted_matte
-
-    garbage_mask = dilate_mask(garbage_matte_input, dilation)
-
-    # Ensure dimensions match for multiplication
-    if _is_tensor(predicted_matte):
-        # Handle broadcasting if needed
-        pass
-    elif garbage_mask.ndim == 2 and predicted_matte.ndim == 3:
-        # Numpy
-        garbage_mask = garbage_mask[:, :, np.newaxis]
-
-    return predicted_matte * garbage_mask
 
 
 def despill(
