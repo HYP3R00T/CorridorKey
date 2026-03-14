@@ -5,80 +5,85 @@ repo_name = "nikopueringer/CorridorKey"
 repo_url = "https://github.com/nikopueringer/CorridorKey"
 
 nav = [
-    { Home = "index.md" },
-    { Packages = [
-        { "corridorkey-core" = "packages/corridorkey-core.md" },
-        { "corridorkey" = "packages/corridorkey.md" },
+  { Home = "index.md" },
+  { Packages = [
+    { "corridorkey-core" = [
+      { "Overview" = "packages/corridorkey-core/index.md" },
+      { "Output Contract" = "packages/corridorkey-core/output-contract.md" },
+      { "Backend Selection" = "packages/corridorkey-core/backend-selection.md" },
+      { "Compositing Utilities" = "packages/corridorkey-core/compositing-utilities.md" },
     ] },
-    { Development = [
-        { "Developer Setup" = "dev/developer-setup.md" },
-        { "Testing" = [
-            { "Overview" = "dev/testing/index.md" },
-            { "Unit Tests" = "dev/testing/unit-tests.md" },
-            { "Integration Tests" = "dev/testing/integration-tests.md" },
-            { "Property-Based Tests" = "dev/testing/property-tests.md" },
-            { "Hardware-Gated Tests" = "dev/testing/hardware-gated.md" },
-        ] },
-        { "Authoring Documentation" = "dev/authoring-documentation.md" },
-        { "Naming Conventions" = "dev/naming-conventions.md" },
-        { "Documentation Principles" = [
-            { "Overview" = "dev/documentation-principles/index.md" },
-            { "Principle 1" = "dev/documentation-principles/principle-1-no-fiction.md" },
-            { "Principle 2" = "dev/documentation-principles/principle-2-single-responsibility.md" },
-            { "Principle 3" = "dev/documentation-principles/principle-3-scale-by-folders.md" },
-            { "Principle 4" = "dev/documentation-principles/principle-4-link-to-code.md" },
-            { "Principle 5" = "dev/documentation-principles/principle-5-format-style.md" },
-            { "Principle 6" = "dev/documentation-principles/principle-6-structure-uniformity.md" },
-        ] },
+    { "corridorkey" = "packages/corridorkey.md" },
+  ] },
+  { Development = [
+    { "Developer Setup" = "dev/developer-setup.md" },
+    { "Testing" = [
+      { "Overview" = "dev/testing/index.md" },
+      { "Unit Tests" = "dev/testing/unit-tests.md" },
+      { "Integration Tests" = "dev/testing/integration-tests.md" },
+      { "Property-Based Tests" = "dev/testing/property-tests.md" },
+      { "Hardware-Gated Tests" = "dev/testing/hardware-gated.md" },
     ] },
-    { API = [
-        { "corridorkey-core" = [
-            { "Overview" = "api/corridorkey-core/index.md" },
-            { "compositing" = "api/corridorkey-core/compositing.md" },
-            { "inference-engine" = "api/corridorkey-core/inference-engine.md" },
-            { "model-transformer" = "api/corridorkey-core/model-transformer.md" },
-        ] },
-        { "corridorkey" = [
-            { "Overview" = "api/corridorkey/index.md" },
-            { "service" = "api/corridorkey/service.md" },
-            { "pipeline" = "api/corridorkey/pipeline.md" },
-            { "clip-state" = "api/corridorkey/clip-state.md" },
-            { "job-queue" = "api/corridorkey/job-queue.md" },
-            { "protocols" = "api/corridorkey/protocols.md" },
-            { "models" = "api/corridorkey/models.md" },
-            { "errors" = "api/corridorkey/errors.md" },
-            { "project" = "api/corridorkey/project.md" },
-            { "device-utils" = "api/corridorkey/device-utils.md" },
-            { "frame-io" = "api/corridorkey/frame-io.md" },
-            { "ffmpeg-tools" = "api/corridorkey/ffmpeg-tools.md" },
-            { "validators" = "api/corridorkey/validators.md" },
-            { "natural-sort" = "api/corridorkey/natural-sort.md" },
-        ] },
+    { "Authoring Documentation" = "dev/authoring-documentation.md" },
+    { "Naming Conventions" = "dev/naming-conventions.md" },
+    { "Documentation Principles" = [
+      { "Overview" = "dev/documentation-principles/index.md" },
+      { "Principle 1" = "dev/documentation-principles/principle-1-no-fiction.md" },
+      { "Principle 2" = "dev/documentation-principles/principle-2-single-responsibility.md" },
+      { "Principle 3" = "dev/documentation-principles/principle-3-scale-by-folders.md" },
+      { "Principle 4" = "dev/documentation-principles/principle-4-link-to-code.md" },
+      { "Principle 5" = "dev/documentation-principles/principle-5-format-style.md" },
+      { "Principle 6" = "dev/documentation-principles/principle-6-structure-uniformity.md" },
     ] },
+  ] },
+  { API = [
+    { "corridorkey-core" = [
+      { "Overview" = "api/corridorkey-core/index.md" },
+      { "compositing" = "api/corridorkey-core/compositing.md" },
+      { "inference-engine" = "api/corridorkey-core/inference-engine.md" },
+      { "model-transformer" = "api/corridorkey-core/model-transformer.md" },
+    ] },
+    { "corridorkey" = [
+      { "Overview" = "api/corridorkey/index.md" },
+      { "service" = "api/corridorkey/service.md" },
+      { "pipeline" = "api/corridorkey/pipeline.md" },
+      { "clip-state" = "api/corridorkey/clip-state.md" },
+      { "job-queue" = "api/corridorkey/job-queue.md" },
+      { "protocols" = "api/corridorkey/protocols.md" },
+      { "models" = "api/corridorkey/models.md" },
+      { "errors" = "api/corridorkey/errors.md" },
+      { "project" = "api/corridorkey/project.md" },
+      { "device-utils" = "api/corridorkey/device-utils.md" },
+      { "frame-io" = "api/corridorkey/frame-io.md" },
+      { "ffmpeg-tools" = "api/corridorkey/ffmpeg-tools.md" },
+      { "validators" = "api/corridorkey/validators.md" },
+      { "natural-sort" = "api/corridorkey/natural-sort.md" },
+    ] },
+  ] },
 ]
 
 [project.theme]
 language = "en"
 features = [
-    "announce.dismiss",
-    "content.action.edit",
-    "content.action.view",
-    "content.code.annotate",
-    "content.code.copy",
-    "content.code.select",
-    "content.footnote.tooltips",
-    "content.tabs.link",
-    "content.tooltips",
-    "navigation.footer",
-    "navigation.indexes",
-    "navigation.instant",
-    "navigation.instant.prefetch",
-    "navigation.instant.progress",
-    "navigation.path",
-    "navigation.tabs",
-    "navigation.top",
-    "navigation.tracking",
-    "search.highlight",
+  "announce.dismiss",
+  "content.action.edit",
+  "content.action.view",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.instant.progress",
+  "navigation.path",
+  "navigation.tabs",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
 ]
 
 [[project.theme.palette]]
@@ -109,7 +114,7 @@ view = "lucide/file-braces-corner"
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
-    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
 
 [project.markdown_extensions.pymdownx.tabbed]
