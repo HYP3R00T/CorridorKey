@@ -38,16 +38,16 @@ def _solid_array(h: int, w: int, r: float, g: float, b: float) -> np.ndarray:
 
 @given(_unit_float)
 def test_srgb_linear_roundtrip(value: float):
-    """sRGB -> linear -> sRGB must recover the original value."""
+    """sRGB -> linear -> sRGB must recover the original value within LUT tolerance."""
     x = np.array([value], dtype=np.float32)
-    assert np.allclose(srgb_to_linear(linear_to_srgb(x)), x, atol=1e-5)
+    assert np.allclose(srgb_to_linear(linear_to_srgb(x)), x, atol=1e-4)
 
 
 @given(_unit_float)
 def test_linear_srgb_roundtrip(value: float):
-    """linear -> sRGB -> linear must recover the original value."""
+    """linear -> sRGB -> linear must recover the original value within LUT tolerance."""
     x = np.array([value], dtype=np.float32)
-    assert np.allclose(linear_to_srgb(srgb_to_linear(x)), x, atol=1e-5)
+    assert np.allclose(linear_to_srgb(srgb_to_linear(x)), x, atol=2e-4)
 
 
 @given(_unit_float)

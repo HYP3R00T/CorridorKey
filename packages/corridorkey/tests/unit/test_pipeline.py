@@ -89,10 +89,20 @@ class TestProcessClip:
         assert summary.skipped is True
 
     def test_extracting_clip_is_skipped(self):
-        """An EXTRACTING clip (frames not yet ready) must be skipped."""
+        """An EXTRACTING clip with no extract_clip mock must be handled by the service."""
         clip = _make_clip("shot1", ClipState.EXTRACTING)
-        summary = _process_clip(clip, self._service(), InferenceParams(), OutputConfig(), None, None, None, None)
-        assert summary.skipped is True
+        service = self._service()
+
+        # extract_clip transitions the clip to READY so inference runs
+        def fake_extract(c, **kwargs):
+            c.state = ClipState.READY
+            c.input_asset = MagicMock(frame_count=5)
+            c.alpha_asset = MagicMock(frame_count=5)
+
+        service.extract_clip.side_effect = fake_extract
+        summary = _process_clip(clip, service, InferenceParams(), OutputConfig(), None, None, None, None)
+        service.extract_clip.assert_called_once()
+        assert summary.error is None
 
     def test_raw_without_generator_is_skipped(self):
         """A RAW clip with no alpha generator must be skipped with a warning."""

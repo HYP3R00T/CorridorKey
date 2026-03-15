@@ -260,6 +260,7 @@ mlx = [
 dev = [
     { name = "corridorkey-cli" },
     { name = "git-cliff" },
+    { name = "hypothesis" },
     { name = "prek" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -282,6 +283,7 @@ provides-extras = ["cuda", "mlx"]
 dev = [
     { name = "corridorkey-cli", editable = "packages/corridorkey-cli" },
     { name = "git-cliff", specifier = ">=2.12.0" },
+    { name = "hypothesis", specifier = ">=6.151.9" },
     { name = "prek", specifier = ">=0.3.5" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
