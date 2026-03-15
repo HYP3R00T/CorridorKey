@@ -90,9 +90,9 @@ class CorridorKeyConfig(BaseModel):
 
     # Default output formats
     fg_format: str = "exr"
-    matte_format: str = "png"
+    matte_format: str = "exr"
     comp_format: str = "png"
-    processed_format: str = "exr"
+    processed_format: str = "png"
 
     @field_validator("app_dir", "checkpoint_dir", mode="before")
     @classmethod
@@ -134,14 +134,14 @@ def export_config(config: CorridorKeyConfig, path: str | Path | None = None) -> 
     ]
     for field_name in CorridorKeyConfig.model_fields:
         value = getattr(config, field_name)
-        if value is None:
-            continue
         if isinstance(value, Path):
             value = str(value)
-        if isinstance(value, bool):
+        if value is None:
+            lines.append(f"{field_name}: null")
+        elif isinstance(value, bool):
             lines.append(f"{field_name}: {'true' if value else 'false'}")
         elif isinstance(value, str):
-            lines.append(f"{field_name}: {value}")
+            lines.append(f'{field_name} = "{value}"')
         else:
             lines.append(f"{field_name}: {value}")
 
