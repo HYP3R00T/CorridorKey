@@ -169,6 +169,6 @@ def test_checkerboard_only_two_values(c1: float, c2: float):
     """create_checkerboard must contain exactly two distinct color values."""
     result = create_checkerboard(64, 64, checker_size=16, color1=c1, color2=c2)
     unique = np.unique(result[..., 0].round(5))
-    # If c1 == c2 there is only one value, otherwise exactly two
-    expected = 1 if np.isclose(c1, c2, atol=1e-5) else 2
+    # Compare the inputs using the same rounding as the output uniqueness
+    expected = len(np.unique(np.round([c1, c2], 5)))
     assert len(unique) == expected
