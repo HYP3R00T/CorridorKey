@@ -1,0 +1,48 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches: [main]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test & Quality Checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Run linting (ruff)
+        run: |
+          uv run ruff check .
+
+      - name: Run formatting check (ruff)
+        run: |
+          uv run ruff format --check .
+
+      - name: Run type checks
+        run: |
+          uv run ty check
+
+      - name: Run tests with coverage
+        run: |
+          uv run pytest packages/corridorkey-core/tests packages/corridorkey/tests --cov=corridorkey_core --cov=corridorkey --cov-report=term-missing --cov-fail-under=75
