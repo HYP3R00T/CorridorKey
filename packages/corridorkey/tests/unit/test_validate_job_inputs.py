@@ -98,12 +98,22 @@ class TestTier1DiskSpace:
     """Tier 1: disk space check."""
 
     def test_error_when_insufficient_disk_space(self, tmp_path: Path):
+        import contextlib
+        import os
+
         clip = _clip(tmp_path)
+        mock_stat = MagicMock()
+        mock_stat.f_bavail = 0
+        mock_stat.f_frsize = 4096
+
+        statvfs_patch = (
+            patch("os.statvfs", return_value=mock_stat) if hasattr(os, "statvfs") else contextlib.nullcontext()
+        )
         with (
             patch("torch.cuda.is_available", return_value=False),
-            patch("shutil.disk_usage") as mock_du,
+            patch("shutil.disk_usage", return_value=MagicMock(free=0)),
+            statvfs_patch,
         ):
-            mock_du.return_value = MagicMock(free=0)  # 0 bytes free
             result = validate_job_inputs(clip, expected_output_gb=2.0)
         assert result.ok is False
         assert any("insufficient disk space" in e for e in result.errors)
