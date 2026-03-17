@@ -63,7 +63,7 @@ Current exclusions:
 
 | Package | Module | Reason |
 |---|---|---|
-| `corridorkey-core` | `inference_engine.py` | Requires a real checkpoint file |
+| `corridorkey-core` | `engine.py` | Requires a real checkpoint file |
 | `corridorkey` | `service.py` | Requires GPU, real checkpoint, and filesystem |
 | `corridorkey` | `ffmpeg_tools.py` | Requires FFmpeg installed as a system dependency |
 | `corridorkey` | `frame_io.py` | Requires real video/image files on disk |

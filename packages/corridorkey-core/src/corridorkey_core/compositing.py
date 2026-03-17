@@ -88,10 +88,11 @@ _srgb_to_linear_lut: np.ndarray = np.where(
 def _apply_lut(x: np.ndarray, lut: np.ndarray) -> np.ndarray:
     """Apply a float32 LUT to a float32 array via uint16 index mapping.
 
-    Values are clamped to [0, 1] before indexing. This is ~60x faster than
-    np.power() for large arrays.
+    Values are clamped to [0, 1] before indexing. Rounding (not truncation)
+    is used so each value maps to its nearest LUT entry, halving the maximum
+    quantisation error from one full step to half a step.
     """
-    indices = np.clip((x * (_LUT_SIZE - 1)).astype(np.uint16), 0, _LUT_SIZE - 1)
+    indices = np.clip(np.rint(x * (_LUT_SIZE - 1)).astype(np.uint16), 0, _LUT_SIZE - 1)
     return lut[indices]
 
 
@@ -267,6 +268,42 @@ def clean_matte(alpha: np.ndarray, area_threshold: int = 300, dilation: int = 15
         alpha_cleaned = alpha_cleaned[:, :, np.newaxis]
 
     return alpha_cleaned
+
+
+def apply_source_passthrough(
+    source_srgb: np.ndarray,
+    fg_pred: np.ndarray,
+    alpha_pred: np.ndarray,
+    edge_erode_px: int,
+    edge_blur_px: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Blend original source pixels into opaque interior regions of the fg prediction.
+
+    Interior pixels (where alpha ~= 1.0) are taken from the source frame untouched.
+    The model's fg prediction is only used in the edge transition band where it
+    handles green-screen separation, hair strands, and semi-transparency.
+
+    Args:
+        source_srgb: Original source frame [H, W, 3] sRGB float32.
+        fg_pred: Model fg prediction [H, W, 3] sRGB float32.
+        alpha_pred: Predicted alpha [H, W, 1] float32 in [0, 1].
+        edge_erode_px: Pixels to erode the interior mask inward.
+        edge_blur_px: Gaussian blur radius for the transition seam.
+
+    Returns:
+        Tuple of (blended_fg [H, W, 3], rebuilt_processed_rgba [H, W, 4]).
+    """
+    alpha_2d = alpha_pred[:, :, 0]
+    kernel_size = max(1, edge_erode_px * 2 + 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    interior = cv2.erode(alpha_2d, kernel, iterations=1)
+    blur_k = max(1, edge_blur_px * 2 + 1)
+    blend_mask = cv2.GaussianBlur(interior, (blur_k, blur_k), 0)[:, :, np.newaxis]
+    blended_fg = np.asarray(blend_mask * source_srgb + (1.0 - blend_mask) * fg_pred, dtype=np.float32)
+    fg_lin = np.asarray(srgb_to_linear(blended_fg), dtype=np.float32)
+    fg_premul = np.asarray(premultiply(fg_lin, alpha_pred), dtype=np.float32)
+    processed_rgba = np.concatenate([fg_premul, alpha_pred], axis=-1)
+    return blended_fg, processed_rgba
 
 
 def create_checkerboard(

@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from corridorkey_core.inference_engine import CorridorKeyEngine
+    from corridorkey_core.engine import CorridorKeyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ def discover_checkpoint(checkpoint_dir: str | Path, ext: str) -> Path:
         hint = ""
         if other_files:
             other_backend = "mlx" if other_ext == MLX_EXT else "torch"
-            hint = f" (Found {other_ext} files - did you mean --backend={other_backend}?)"
+            hint = f" (Found {other_ext} files - did you mean -backend={other_backend}?)"
         raise FileNotFoundError(f"No {ext} checkpoint found in {checkpoint_dir}.{hint}")
 
     if len(matches) > 1:
@@ -218,6 +218,9 @@ class _MLXEngineAdapter:  # pragma: no cover
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
+        source_passthrough: bool = False,
+        edge_erode_px: int = 3,
+        edge_blur_px: int = 7,
     ) -> dict:
         """Delegate to the MLX engine then normalize output to the Torch contract."""
         # MLX engine expects uint8 - convert if float
@@ -241,7 +244,65 @@ class _MLXEngineAdapter:  # pragma: no cover
             despeckle_size=despeckle_size,
         )
 
-        return _wrap_mlx_output(mlx_output, despill_strength, auto_despeckle, despeckle_size)
+        result = _wrap_mlx_output(mlx_output, despill_strength, auto_despeckle, despeckle_size)
+
+        if source_passthrough:
+            from corridorkey_core.compositing import apply_source_passthrough, linear_to_srgb
+
+            image_f32 = image.astype(np.float32) if image.dtype == np.uint8 else image
+            source_srgb = np.asarray(linear_to_srgb(image_f32), dtype=np.float32) if input_is_linear else image_f32
+            result["fg"], result["processed"] = apply_source_passthrough(
+                source_srgb, result["fg"], result["alpha"], edge_erode_px, edge_blur_px
+            )
+
+        return result
+
+
+_PRECISION_MAP: dict[str, torch.dtype] = {
+    "fp16": torch.float16,
+    "bf16": torch.bfloat16,
+    "fp32": torch.float32,
+}
+
+VALID_PRECISIONS = ("auto", "fp16", "bf16", "fp32")
+
+
+def _resolve_precision(precision: str, device: str) -> torch.dtype:
+    """Resolve the model weight dtype from a precision string.
+
+    "auto" selects BF16 on Ampere+ CUDA or Apple Silicon MPS, FP16 otherwise.
+
+    Args:
+        precision: One of "auto", "fp16", "bf16", "fp32".
+        device: Torch device string used for capability detection.
+
+    Returns:
+        torch.dtype to use for model weights.
+
+    Raises:
+        ValueError: If precision is not a recognised value.
+    """
+    if precision not in VALID_PRECISIONS:
+        raise ValueError(f"Unknown precision '{precision}'. Valid: {', '.join(VALID_PRECISIONS)}")
+
+    if precision != "auto":
+        return _PRECISION_MAP[precision]
+
+    # Auto-detect: prefer BF16 on hardware that supports it natively.
+    dev = torch.device(device)
+    if dev.type == "mps":
+        logger.info("Precision auto -> bf16 (Apple Silicon MPS)")
+        return torch.bfloat16
+    if dev.type == "cuda" and torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(dev)
+        # BF16 hardware support was introduced with Ampere (compute capability 8.0).
+        if props.major >= 8:
+            logger.info("Precision auto -> bf16 (Ampere+ GPU: %s)", props.name)
+            return torch.bfloat16
+        logger.info("Precision auto -> fp16 (pre-Ampere GPU: %s)", props.name)
+        return torch.float16
+    logger.info("Precision auto -> fp16 (default)")
+    return torch.float16
 
 
 def create_engine(
@@ -249,6 +310,8 @@ def create_engine(
     backend: str | None = None,
     device: str | None = None,
     img_size: int = DEFAULT_IMG_SIZE,
+    optimization_mode: str = "auto",
+    precision: str = "auto",
     tile_size: int | None = DEFAULT_MLX_TILE_SIZE,
     overlap: int = DEFAULT_MLX_TILE_OVERLAP,
 ) -> CorridorKeyEngine | _MLXEngineAdapter:
@@ -262,6 +325,10 @@ def create_engine(
         backend: "torch", "mlx", "auto", or None. Resolved via resolve_backend().
         device: Torch device string (e.g. "cuda", "cpu"). Torch only. Defaults to "cpu" when None.
         img_size: Square resolution the model runs at internally.
+        optimization_mode: Torch only - "auto", "speed", or "lowvram".
+            Controls CNN refiner tiling and torch.compile. See CorridorKeyEngine for details.
+        precision: Torch only - "auto", "fp16", "bf16", or "fp32".
+            "auto" selects BF16 on Ampere+/Apple Silicon, FP16 otherwise.
         tile_size: MLX only - tile size for tiled inference. None = full-frame.
         overlap: MLX only - overlap pixels between tiles.
 
@@ -281,9 +348,21 @@ def create_engine(
 
     # Torch
     ckpt = discover_checkpoint(Path(checkpoint_dir), TORCH_EXT)
-    from corridorkey_core.inference_engine import CorridorKeyEngine  # pragma: no cover
+    from corridorkey_core.engine import CorridorKeyEngine  # pragma: no cover
 
-    logger.info("Torch engine loaded: %s (device=%s)", ckpt.name, device or "cpu")  # pragma: no cover
+    resolved_device = device or "cpu"
+    model_dtype = _resolve_precision(precision, resolved_device)
+    logger.info(  # pragma: no cover
+        "Torch engine loaded: %s (device=%s, optimization=%s, precision=%s)",
+        ckpt.name,
+        resolved_device,
+        optimization_mode,
+        model_dtype,
+    )
     return CorridorKeyEngine(
-        checkpoint_path=ckpt, device=device or "cpu", img_size=img_size, model_precision=torch.float16
+        checkpoint_path=ckpt,
+        device=resolved_device,
+        img_size=img_size,
+        model_precision=model_dtype,
+        optimization_mode=optimization_mode,
     )  # pragma: no cover
