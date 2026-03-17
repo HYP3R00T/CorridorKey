@@ -187,6 +187,7 @@ class CorridorKeyService:
                 "device": str(cfg.get("device", "unknown")),
                 "optimization_mode": str(cfg.get("optimization_mode", "unknown")),
                 "precision": str(cfg.get("precision", "unknown")),
+                "img_size": str(cfg.get("img_size", "unknown")),
             }
         return None
 
@@ -241,24 +242,51 @@ class CorridorKeyService:
         """Lazy-load the inference engine."""
         if self._engine is not None:
             return self._engine
+
+        requested_precision = self._config.precision
+        requested_img_size = 2048
+
+        # On low-VRAM CUDA laptops, 2048 + lowvram tiling can be prohibitively
+        # slow. Apply a conservative speed profile when settings are auto.
+        if self._device == "cuda" and self._config.optimization_mode == "auto":
+            try:
+                import torch
+
+                props = torch.cuda.get_device_properties(0)
+                total_vram_gb = props.total_memory / (1024**3)
+                if total_vram_gb <= 4.5:
+                    requested_img_size = 1024
+                    if requested_precision == "auto":
+                        requested_precision = "fp16"
+                    logger.info(
+                        "Low-VRAM adaptive profile enabled (%.1f GB): img_size=%d, precision=%s",
+                        total_vram_gb,
+                        requested_img_size,
+                        requested_precision,
+                    )
+            except Exception as e:
+                logger.debug("Low-VRAM adaptive profile check skipped: %s", e)
+
         logger.info("Loading inference engine (device=%s)...", self._device)
         t0 = time.monotonic()
         self._engine = create_engine(
             checkpoint_dir=self._config.checkpoint_dir,
             device=self._device,
+            img_size=requested_img_size,
             optimization_mode=self._config.optimization_mode,
-            precision=self._config.precision,
+            precision=requested_precision,
         )
         self._engine_loaded = True
         logger.info("Engine loaded in %.1fs", time.monotonic() - t0)
         runtime_cfg = self.get_engine_runtime_config()
         if runtime_cfg is not None:
             logger.info(
-                "Engine resolved config: backend=%s, device=%s, optimization=%s, precision=%s",
+                "Engine resolved config: backend=%s, device=%s, optimization=%s, precision=%s, img_size=%s",
                 runtime_cfg["backend"],
                 runtime_cfg["device"],
                 runtime_cfg["optimization_mode"],
                 runtime_cfg["precision"],
+                runtime_cfg["img_size"],
             )
         return self._engine
 
@@ -454,6 +482,7 @@ class CorridorKeyService:
         skip_stems: set[str] | None = None,
         output_config: OutputConfig | None = None,
         frame_range: tuple[int, int] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> list[FrameResult]:
         """Run inference on a single clip.
 
@@ -541,6 +570,9 @@ class CorridorKeyService:
         try:
             for progress_i, i in enumerate(frame_indices):
                 t_frame_total = time.monotonic()
+                if cancel_event and cancel_event.is_set():
+                    stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
+                    raise JobCancelledError(clip.name, i)
                 if job and job.is_cancelled:
                     stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
                     raise JobCancelledError(clip.name, i)
