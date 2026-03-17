@@ -40,6 +40,8 @@ from corridorkey.writer import exr_flags, write_outputs
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+
 
 def inference_params_to_postprocess(params: InferenceParams):
     """Convert InferenceParams to PostprocessParams for stage 5 postprocessing."""
@@ -141,39 +143,45 @@ class CorridorKeyService:
         device: str | None = None,
         optimization_mode: str | None = None,
         precision: str | None = None,
-    ) -> tuple[str, str, str]:
+        img_size: int | None | object = _UNSET,
+    ) -> tuple[str, str, str, int | None]:
         """Apply runtime engine settings and unload engine if they changed.
 
         Returns:
-            Tuple of (resolved_device, optimization_mode, precision) now active.
+            Tuple of (resolved_device, optimization_mode, precision, img_size) now active.
         """
         current_opt = self._config.optimization_mode
         current_precision = self._config.precision
+        current_img_size = self._config.img_size
         target_opt = optimization_mode or current_opt
         target_precision = precision or current_precision
+        target_img_size = current_img_size if img_size is _UNSET else img_size
         target_device = self._device if device is None else device_utils.resolve_device(device)
 
         changed = (
             target_device != self._device
             or target_opt != self._config.optimization_mode
             or target_precision != self._config.precision
+            or target_img_size != self._config.img_size
         )
 
         self._device = target_device
         self._config.device = target_device
         self._config.optimization_mode = target_opt
         self._config.precision = target_precision
+        self._config.img_size = target_img_size if isinstance(target_img_size, int) or target_img_size is None else None
 
         if changed and self.is_engine_loaded():
             logger.info(
-                "Engine settings changed (device=%s, optimization=%s, precision=%s) - reloading engine",
+                "Engine settings changed (device=%s, optimization=%s, precision=%s, img_size=%s) - reloading engine",
                 self._device,
                 self._config.optimization_mode,
                 self._config.precision,
+                self._config.img_size if self._config.img_size is not None else "auto",
             )
             self.unload_engine()
 
-        return self._device, self._config.optimization_mode, self._config.precision
+        return self._device, self._config.optimization_mode, self._config.precision, self._config.img_size
 
     def get_engine_runtime_config(self) -> dict[str, str] | None:
         """Return resolved runtime settings from the loaded engine, if available."""
@@ -244,11 +252,12 @@ class CorridorKeyService:
             return self._engine
 
         requested_precision = self._config.precision
-        requested_img_size = 2048
+        requested_img_size = self._config.img_size if self._config.img_size is not None else 2048
 
         # On low-VRAM CUDA laptops, 2048 + lowvram tiling can be prohibitively
         # slow. Apply a conservative speed profile when settings are auto.
-        if self._device == "cuda" and self._config.optimization_mode == "auto":
+        adaptive_img_size = self._config.img_size is None
+        if self._device == "cuda" and self._config.optimization_mode == "auto" and adaptive_img_size:
             try:
                 import torch
 
@@ -266,6 +275,8 @@ class CorridorKeyService:
                     )
             except Exception as e:
                 logger.debug("Low-VRAM adaptive profile check skipped: %s", e)
+        elif self._config.img_size is not None:
+            logger.info("Using explicit image size override: img_size=%d", requested_img_size)
 
         logger.info("Loading inference engine (device=%s)...", self._device)
         t0 = time.monotonic()

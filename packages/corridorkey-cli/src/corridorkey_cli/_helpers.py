@@ -16,7 +16,7 @@ def setup_logging(verbose: bool = False) -> Path | None:
     """Configure logging for a CLI session.
 
     Wires a Rich console handler (WARNING+, or DEBUG when verbose) and a
-    rotating JSON file handler (INFO+ by default) onto the root logger.
+    rotating text file handler (INFO+ by default) onto the root logger.
     The file handler writes to ``~/.config/corridorkey/logs/corridorkey.log``.
 
     Args:

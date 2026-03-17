@@ -38,6 +38,8 @@ _STATE_COLOURS: dict[str, str] = {
     "ERROR": "red",
 }
 
+_ENGINE_PRESET_CHOICES: list[str] = ["manual", "speed", "balanced", "quality", "max_quality", "lowvram"]
+
 
 @app.callback(invoke_without_command=True)
 def wizard(
@@ -108,7 +110,7 @@ def wizard(
             continue
 
         if yes:
-            params, output_config, device, opt_mode, precision = _defaults_from_config(config)
+            params, output_config, device, opt_mode, precision, img_size = _defaults_from_config(config)
         else:
             label_parts = []
             if ready:
@@ -129,9 +131,9 @@ def wizard(
                 console.print("[dim]Re-scanning...[/dim]")
                 continue
 
-            params, output_config, device, opt_mode, precision = _prompt_settings(config)
+            params, output_config, device, opt_mode, precision, img_size = _prompt_settings(config)
 
-        _run_inference(service, actionable, params, output_config, device, opt_mode, precision)
+        _run_inference(service, actionable, params, output_config, device, opt_mode, precision, img_size)
 
         if output_config.stitch_enabled or (not yes and Confirm.ask("\nStitch outputs to video?", default=True)):
             _run_stitch(service, actionable, output_config)
@@ -151,7 +153,7 @@ def wizard(
 
 def _defaults_from_config(
     config: CorridorKeyConfig,
-) -> tuple[InferenceParams, OutputConfig, str, str, str]:
+) -> tuple[InferenceParams, OutputConfig, str, str, str, int | None]:
     params = InferenceParams(
         input_is_linear=config.input_is_linear,
         despill_strength=config.despill_strength,
@@ -170,30 +172,49 @@ def _defaults_from_config(
         exr_compression=config.exr_compression,
         stitch_enabled=True,
     )
-    return params, output_config, config.device, config.optimization_mode, config.precision
+    return params, output_config, config.device, config.optimization_mode, config.precision, config.img_size
 
 
 def _prompt_settings(
     config: CorridorKeyConfig,
-) -> tuple[InferenceParams, OutputConfig, str, str, str]:
+) -> tuple[InferenceParams, OutputConfig, str, str, str, int | None]:
     """Walk through three grouped settings sections."""
 
     # Group 1: Device & Engine
     console.print()
     console.print(Panel("[bold]Device & Engine[/bold]", border_style="cyan", expand=False))
     _show_group([
+        ("engine_preset", "manual", "manual / speed / balanced / quality / max_quality / lowvram"),
         ("device", config.device, "auto / cuda / mps / cpu"),
         ("optimization_mode", config.optimization_mode, "auto / speed / lowvram"),
         ("precision", config.precision, "auto / fp16 / bf16 / fp32"),
+        (
+            "img_size",
+            str(config.img_size) if config.img_size is not None else "auto",
+            "auto / 1024 / 1536 / 2048 / 2560",
+        ),
     ])
-    if Confirm.ask("Accept device settings?", default=True):
-        device, opt_mode, precision = config.device, config.optimization_mode, config.precision
-    else:
-        device = Prompt.ask("device", choices=["auto", "cuda", "mps", "cpu"], default=config.device)
-        opt_mode = Prompt.ask(
-            "optimization_mode", choices=["auto", "speed", "lowvram"], default=config.optimization_mode
+    preset_choice = Prompt.ask("engine preset", choices=_ENGINE_PRESET_CHOICES, default="manual")
+    if preset_choice != "manual":
+        device, opt_mode, precision, img_size = _resolve_engine_preset(preset_choice, config.device)
+        _show_group([
+            ("preset", preset_choice, ""),
+            ("device", device, ""),
+            ("optimization_mode", opt_mode, ""),
+            ("precision", precision, ""),
+            ("img_size", str(img_size) if img_size is not None else "auto", ""),
+        ])
+        if not Confirm.ask("Use preset values?", default=True):
+            device, opt_mode, precision, img_size = _prompt_manual_engine_settings(config)
+    elif Confirm.ask("Accept device settings?", default=True):
+        device, opt_mode, precision, img_size = (
+            config.device,
+            config.optimization_mode,
+            config.precision,
+            config.img_size,
         )
-        precision = Prompt.ask("precision", choices=["auto", "fp16", "bf16", "fp32"], default=config.precision)
+    else:
+        device, opt_mode, precision, img_size = _prompt_manual_engine_settings(config)
 
     # Group 2: Inference & Postprocess
     console.print()
@@ -282,7 +303,7 @@ def _prompt_settings(
         exr_compression=exr_compression,
         stitch_enabled=False,  # wizard handles stitch separately
     )
-    return params, output_config, device, opt_mode, precision
+    return params, output_config, device, opt_mode, precision, img_size
 
 
 def _show_group(rows: list[tuple[str, str, str]]) -> None:
@@ -293,6 +314,32 @@ def _show_group(rows: list[tuple[str, str, str]]) -> None:
     for name, value, options in rows:
         table.add_row(name, f"[cyan]{value}[/cyan]", options)
     console.print(table)
+
+
+def _prompt_manual_engine_settings(config: CorridorKeyConfig) -> tuple[str, str, str, int | None]:
+    device = Prompt.ask("device", choices=["auto", "cuda", "mps", "cpu"], default=config.device)
+    opt_mode = Prompt.ask("optimization_mode", choices=["auto", "speed", "lowvram"], default=config.optimization_mode)
+    precision = Prompt.ask("precision", choices=["auto", "fp16", "bf16", "fp32"], default=config.precision)
+    img_size_text = Prompt.ask(
+        "img_size",
+        choices=["auto", "1024", "1536", "2048", "2560"],
+        default=str(config.img_size) if config.img_size is not None else "auto",
+    )
+    img_size = None if img_size_text == "auto" else int(img_size_text)
+    return device, opt_mode, precision, img_size
+
+
+def _resolve_engine_preset(preset: str, default_device: str = "auto") -> tuple[str, str, str, int | None]:
+    presets: dict[str, tuple[str, str, str, int | None]] = {
+        "speed": (default_device, "speed", "fp16", 1024),
+        "balanced": (default_device, "auto", "auto", 1536),
+        "quality": (default_device, "speed", "bf16", 2048),
+        "max_quality": (default_device, "speed", "fp32", 2560),
+        "lowvram": (default_device, "lowvram", "fp16", 1024),
+    }
+    if preset not in presets:
+        raise ValueError(f"Unknown preset: {preset}")
+    return presets[preset]
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +415,7 @@ def _run_inference(
     device: str,
     optimization_mode: str,
     precision: str,
+    img_size: int | None,
 ) -> None:
     from rich.progress import Progress as RichProgress
     from rich.progress import SpinnerColumn, TextColumn
@@ -384,14 +432,16 @@ def _run_inference(
 
     signal.signal(signal.SIGINT, _request_cancel)
 
-    active_device, active_opt_mode, active_precision = service.configure_engine_settings(
+    active_device, active_opt_mode, active_precision, active_img_size = service.configure_engine_settings(
         device=device,
         optimization_mode=optimization_mode,
         precision=precision,
+        img_size=img_size,
     )
     console.print(
         "[dim]Engine request: "
-        f"device={active_device}, optimization={active_opt_mode}, precision={active_precision}[/dim]"
+        f"device={active_device}, optimization={active_opt_mode}, precision={active_precision}, "
+        f"img_size={active_img_size if active_img_size is not None else 'auto'}[/dim]"
     )
 
     try:

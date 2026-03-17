@@ -31,6 +31,7 @@ class TestCorridorKeyConfig:
         """All fields must have the documented default values so new installs work without a config file."""
         config = CorridorKeyConfig()
         assert config.device == "auto"
+        assert config.img_size is None
         assert config.despill_strength == 1.0
         assert config.auto_despeckle is True
         assert config.despeckle_size == 400

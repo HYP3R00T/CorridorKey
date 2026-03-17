@@ -1,11 +1,11 @@
-"""Structured file logging for CorridorKey.
+"""Readable file logging for CorridorKey.
 
 Every CLI session calls ``setup_logging()`` once at startup. It wires two
 handlers onto the root logger:
 
 - ``RichHandler``  - console, WARNING+ by default (DEBUG when verbose=True).
 - ``RotatingFileHandler`` - session log file, INFO+ by default (or config.log_level).
-  Writes newline-delimited JSON so logs are machine-readable and easy to grep.
+    Writes timestamped text logs with level and logger name for easy debugging.
 
 Log files live in ``config.log_dir`` (default ``~/.config/corridorkey/logs``).
 Each session creates a new file named ``YYMMDD_HHMMSS_corridorkey.log``, so
@@ -20,7 +20,6 @@ Sharing a bug report:
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 import logging.handlers
 import os
@@ -40,32 +39,14 @@ _MAX_BYTES = 5 * 1024 * 1024  # 5 MB per file
 _BACKUP_COUNT = 5  # keep 5 rotations (~25 MB total)
 
 
-class _JsonFormatter(logging.Formatter):
-    """Format each log record as a single-line JSON object.
+class _TextFormatter(logging.Formatter):
+    """Format each log record as readable text with timestamp and metadata."""
 
-    Fields emitted:
-        ts      ISO-8601 timestamp with milliseconds (UTC)
-        level   Log level name
-        logger  Logger name (module path)
-        msg     Formatted message string
-        exc     Exception traceback string (only when an exception is attached)
-    """
-
-    def format(self, record: logging.LogRecord) -> str:
-        ts = (
-            datetime.datetime.fromtimestamp(record.created, tz=datetime.timezone.utc)
-            .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
-            + "Z"
+    def __init__(self) -> None:
+        super().__init__(
+            fmt="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
-        obj: dict = {
-            "ts": ts,
-            "level": record.levelname,
-            "logger": record.name,
-            "msg": record.getMessage(),
-        }
-        if record.exc_info:
-            obj["exc"] = self.formatException(record.exc_info)
-        return json.dumps(obj, ensure_ascii=False)
 
 
 def setup_logging(
@@ -108,7 +89,7 @@ def setup_logging(
     console_handler.setLevel(console_level)
 
     # ------------------------------------------------------------------ #
-    # File handler - session-named JSON log                               #
+    # File handler - session-named readable log                           #
     # ------------------------------------------------------------------ #
     log_path: Path | None = None
     file_handler: logging.Handler | None = None
@@ -128,7 +109,7 @@ def setup_logging(
             encoding="utf-8",
         )
         rotating.setLevel(file_level)
-        rotating.setFormatter(_JsonFormatter())
+        rotating.setFormatter(_TextFormatter())
         file_handler = rotating
     except OSError as exc:
         # Non-fatal - log to console only.
@@ -155,7 +136,7 @@ def setup_logging(
 
 
 def _write_session_header(config: CorridorKeyConfig | None) -> None:
-    """Emit a structured INFO record with session metadata.
+    """Emit an INFO record with session metadata.
 
     This is the first entry in every log file for a new session, giving
     enough context to reproduce the environment when debugging.
@@ -176,25 +157,19 @@ def _write_session_header(config: CorridorKeyConfig | None) -> None:
     except Exception:
         pass
 
-    header = {
-        "event": "session_start",
-        "python": sys.version,
-        "platform": platform.platform(),
-        "pid": os.getpid(),
-        "cuda": cuda_info or None,
-        "config": {
-            "device": config.device if config else "unknown",
-            "optimization_mode": config.optimization_mode if config else "unknown",
-            "precision": config.precision if config else "unknown",
-            "checkpoint_dir": str(config.checkpoint_dir) if config else "unknown",
-            "log_dir": str(config.log_dir) if config else "unknown",
-            "log_level": config.log_level if config else "INFO",
-        }
-        if config
-        else None,
-    }
-
-    logger.info("CorridorKey session started | %s", json.dumps(header))
+    logger.info(
+        "CorridorKey session started | event=session_start python=%s platform=%s pid=%s cuda=%s config={device=%s optimization_mode=%s precision=%s checkpoint_dir=%s log_dir=%s log_level=%s}",
+        sys.version,
+        platform.platform(),
+        os.getpid(),
+        cuda_info or None,
+        config.device if config else "unknown",
+        config.optimization_mode if config else "unknown",
+        config.precision if config else "unknown",
+        str(config.checkpoint_dir) if config else "unknown",
+        str(config.log_dir) if config else "unknown",
+        config.log_level if config else "INFO",
+    )
 
 
 def reset_logging() -> None:

@@ -168,6 +168,22 @@ class CorridorKeyConfig(BaseModel):
         ),
     ] = "auto"
 
+    img_size: Annotated[
+        int | None,
+        Field(
+            default=None,
+            ge=512,
+            le=4096,
+            description=(
+                "Internal square inference resolution. "
+                "Set to null/None for adaptive auto sizing (default). "
+                "Set explicitly (for example 2048 or 2560) to prioritize quality, "
+                "even on low-VRAM GPUs. Larger values improve edge detail but use "
+                "more VRAM and run slower."
+            ),
+        ),
+    ] = None
+
     # ------------------------------------------------------------------ #
     # Inference parameters                                                 #
     # ------------------------------------------------------------------ #
