@@ -18,14 +18,36 @@ app = typer.Typer(help="Process all READY clips in a directory.")
 def process(
     clips_dir: Annotated[Path, typer.Argument(help="Directory containing clips to process.")],
     device: Annotated[str, typer.Option("--device", "-d", help="Compute device: auto, cuda, mps, cpu.")] = "auto",
+    optimization_mode: Annotated[
+        str, typer.Option("--opt-mode", help="Refiner tiling strategy: auto, speed, lowvram.")
+    ] = "auto",
+    precision: Annotated[
+        str, typer.Option("--precision", help="Inference float format: auto, fp16, bf16, fp32.")
+    ] = "auto",
     despill: Annotated[float, typer.Option("--despill", help="Green spill removal strength (0.0-1.0).")] = 1.0,
     despeckle: Annotated[bool, typer.Option("--despeckle/--no-despeckle", help="Remove small matte artifacts.")] = True,
     despeckle_size: Annotated[int, typer.Option("--despeckle-size", help="Min artifact area in pixels.")] = 400,
     refiner: Annotated[float, typer.Option("--refiner", help="Edge refiner scale (0.0 = disabled).")] = 1.0,
     linear: Annotated[bool, typer.Option("--linear", help="Treat input as linear light (not sRGB).")] = False,
+    source_passthrough: Annotated[
+        bool,
+        typer.Option(
+            "--source-passthrough/--no-source-passthrough",
+            help="Use original source pixels in opaque interior regions.",
+        ),
+    ] = False,
+    edge_erode_px: Annotated[
+        int, typer.Option("--edge-erode", help="Interior mask erosion in pixels (source passthrough).")
+    ] = 3,
+    edge_blur_px: Annotated[
+        int, typer.Option("--edge-blur", help="Transition seam blur radius in pixels (source passthrough).")
+    ] = 7,
     fg_format: Annotated[str, typer.Option("--fg-format", help="FG output format: exr or png.")] = "exr",
     matte_format: Annotated[str, typer.Option("--matte-format", help="Matte output format: exr or png.")] = "exr",
     comp_format: Annotated[str, typer.Option("--comp-format", help="Comp output format: exr or png.")] = "png",
+    exr_compression: Annotated[
+        str, typer.Option("--exr-compression", help="EXR compression: dwaa, piz, zip, none.")
+    ] = "dwaa",
     no_comp: Annotated[bool, typer.Option("--no-comp", help="Skip comp output.")] = False,
     no_processed: Annotated[bool, typer.Option("--no-processed", help="Skip processed RGBA output.")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable debug logging.")] = False,
@@ -48,6 +70,9 @@ def process(
         auto_despeckle=despeckle,
         despeckle_size=despeckle_size,
         refiner_scale=refiner,
+        source_passthrough=source_passthrough,
+        edge_erode_px=edge_erode_px,
+        edge_blur_px=edge_blur_px,
     )
     output_config = OutputConfig(
         fg_format=fg_format,
@@ -55,6 +80,7 @@ def process(
         comp_enabled=not no_comp,
         comp_format=comp_format,
         processed_enabled=not no_processed,
+        exr_compression=exr_compression,
     )
 
     with ProgressContext() as prog:
@@ -63,6 +89,8 @@ def process(
             params=params,
             output_config=output_config,
             device=device,
+            optimization_mode=optimization_mode,
+            precision=precision,
             on_progress=prog.on_progress,
             on_warning=prog.on_warning,
             on_clip_start=prog.on_clip_start,
