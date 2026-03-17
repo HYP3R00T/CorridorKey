@@ -569,51 +569,80 @@ class CorridorKeyService:
             except Exception as e:
                 logger.warning("Clip '%s': state transition to COMPLETE failed: %s", clip.name, e)
 
-        if (
-            is_full_clip
-            and cfg.comp_enabled
-            and clip.input_asset is not None
-            and clip.input_asset.asset_type == "video"
-        ):
-            self._stitch_comp_video(clip, dirs["comp"], cfg.comp_format)
+        if is_full_clip and cfg.stitch_enabled:
+            self._stitch_outputs(clip, dirs, cfg)
 
         return results
 
-    def _stitch_comp_video(self, clip: ClipEntry, comp_dir: str, comp_format: str) -> None:
+    def _stitch_outputs(
+        self,
+        clip: ClipEntry,
+        dirs: dict[str, str],
+        cfg: OutputConfig,
+    ) -> None:
+        """Stitch all enabled output sequences into MP4 videos after inference.
+
+        Silently skipped if FFmpeg is not available. Called at the end of
+        run_inference when cfg.stitch_enabled is True.
+
+        Args:
+            clip: The clip that was just processed.
+            dirs: Output subdirectory paths keyed by output name.
+            cfg: OutputConfig controlling which outputs exist and stitch settings.
+        """
+        import contextlib
+        import re as _re
+
         from corridorkey.errors import FFmpegNotFoundError
         from corridorkey.ffmpeg_tools import read_video_metadata, require_ffmpeg, stitch_video
 
         try:
             require_ffmpeg()
         except FFmpegNotFoundError:
-            logger.debug("Clip '%s': FFmpeg not available, skipping comp video stitch", clip.name)
-            return
-
-        comp_frames = [f for f in os.listdir(comp_dir) if f.lower().endswith(f".{comp_format}")]
-        if not comp_frames:
+            logger.debug("Clip '%s': FFmpeg not available, skipping stitch", clip.name)
             return
 
         fps = 24.0
         meta = read_video_metadata(clip.root_path)
         if meta and "fps" in meta:
-            import contextlib
-
             with contextlib.suppress(ValueError, TypeError):
                 fps = float(meta["fps"])
 
-        import re as _re
+        output_root = dirs["root"]
+        subdir_map = {
+            "fg": ("fg", cfg.fg_format),
+            "matte": ("matte", cfg.matte_format),
+            "comp": ("comp", cfg.comp_format),
+            "processed": ("processed", cfg.processed_format),
+        }
 
-        first = sorted(comp_frames)[0]
-        stem = os.path.splitext(first)[0]
-        m = _re.search(r"(\d+)$", stem)
-        pattern = f"{stem[: -len(m.group(1))]}%0{len(m.group(1))}d.{comp_format}" if m else f"frame_%06d.{comp_format}"
+        for name, (dir_key, fmt) in subdir_map.items():
+            if name not in cfg.enabled_outputs:
+                continue
+            frames_dir = dirs.get(dir_key)
+            if not frames_dir or not os.path.isdir(frames_dir):
+                continue
+            frame_files = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(f".{fmt}"))
+            if not frame_files:
+                continue
 
-        comp_video_path = os.path.join(os.path.dirname(comp_dir), f"{clip.name}_comp.mp4")
-        try:
-            logger.info("Clip '%s': stitching comp video -> %s @ %.4f fps", clip.name, comp_video_path, fps)
-            stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
-        except Exception as e:
-            logger.warning("Clip '%s': comp video stitch failed: %s", clip.name, e)
+            first_stem = os.path.splitext(frame_files[0])[0]
+            m = _re.search(r"(\d+)$", first_stem)
+            pattern = f"{first_stem[: -len(m.group(1))]}%0{len(m.group(1))}d.{fmt}" if m else f"frame_%06d.{fmt}"
+            out_path = os.path.join(output_root, f"{clip.name}_{name}.mp4")
+
+            try:
+                logger.info("Clip '%s': stitching %s -> %s @ %.4f fps", clip.name, name, out_path, fps)
+                stitch_video(
+                    frames_dir,
+                    out_path,
+                    fps=fps,
+                    pattern=pattern,
+                    codec=cfg.stitch_codec,
+                    crf=cfg.stitch_crf,
+                )
+            except Exception as e:
+                logger.warning("Clip '%s': stitch failed for '%s': %s", clip.name, name, e)
 
     def stitch_clip_outputs(
         self,

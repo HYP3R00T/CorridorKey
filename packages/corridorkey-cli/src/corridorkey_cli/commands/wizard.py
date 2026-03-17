@@ -45,6 +45,12 @@ def wizard(
     """Interactive wizard: scan -> review -> configure -> process -> re-scan."""
     console.print(Panel("[bold cyan]CorridorKey - Wizard[/bold cyan]", expand=False))
 
+    from corridorkey_cli._helpers import setup_logging
+
+    log_path = setup_logging(verbose=False)
+    if log_path:
+        console.print(f"[dim]Logging to {log_path}[/dim]")
+
     # Resolve directory
     if clips_dir is None:
         raw = Prompt.ask("Clips directory")

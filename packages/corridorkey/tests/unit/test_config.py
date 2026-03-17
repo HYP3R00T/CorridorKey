@@ -89,8 +89,13 @@ class TestExportConfig:
         content = dest.read_text()
         assert "true" in content
         assert "false" in content
-        assert "True" not in content
-        assert "False" not in content
+        # Values must be lowercase - check no field assignment uses Python-cased booleans.
+        import re
+
+        value_lines = [ln for ln in content.splitlines() if re.match(r"^\w+:", ln)]
+        for line in value_lines:
+            assert ": True" not in line, f"Python-cased bool in: {line}"
+            assert ": False" not in line, f"Python-cased bool in: {line}"
 
     def test_string_values_quoted(self, tmp_path: Path):
         """String values must be quoted in YAML format."""

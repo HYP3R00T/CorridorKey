@@ -63,6 +63,11 @@ class OutputConfig:
             "pxr24" - lossless 24-bit, larger files, slower.
             "zip" - lossless ZIP deflate, widely compatible.
             "none" - uncompressed, maximum compatibility, largest files.
+        stitch_enabled: Stitch all enabled output sequences into MP4 videos
+            after inference completes. Recommended - produces both image
+            sequences and videos. Silently skipped if FFmpeg is not available.
+        stitch_codec: FFmpeg video codec for stitched outputs.
+        stitch_crf: Quality factor for stitched outputs (0-51, lower = better).
     """
 
     fg_enabled: bool = True
@@ -74,6 +79,9 @@ class OutputConfig:
     processed_enabled: bool = True
     processed_format: str = "exr"
     exr_compression: str = "dwaa"
+    stitch_enabled: bool = True
+    stitch_codec: str = "libx264"
+    stitch_crf: int = 18
 
     def to_dict(self) -> dict:
         return asdict(self)

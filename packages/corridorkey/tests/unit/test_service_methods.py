@@ -10,6 +10,7 @@ No GPU, no model files, no real frame data needed.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 from corridorkey.clip_state import ClipEntry, ClipState
@@ -24,9 +25,9 @@ from corridorkey.service import (
 
 def _config(
     checkpoint_dir: str = "/fake/ckpt",
-    device: str = "cpu",
-    optimization_mode: str = "auto",
-    precision: str = "fp32",
+    device: Literal["auto", "cuda", "mps", "cpu"] = "cpu",
+    optimization_mode: Literal["auto", "speed", "lowvram"] = "auto",
+    precision: Literal["auto", "fp16", "bf16", "fp32"] = "fp32",
     despill_strength: float = 0.8,
     auto_despeckle: bool = True,
     despeckle_size: int = 300,
@@ -35,11 +36,11 @@ def _config(
     edge_erode_px: int = 5,
     edge_blur_px: int = 11,
     input_is_linear: bool = True,
-    fg_format: str = "png",
-    matte_format: str = "png",
-    comp_format: str = "png",
-    processed_format: str = "png",
-    exr_compression: str = "zip",
+    fg_format: Literal["exr", "png"] = "png",
+    matte_format: Literal["exr", "png"] = "png",
+    comp_format: Literal["exr", "png"] = "png",
+    processed_format: Literal["exr", "png"] = "png",
+    exr_compression: Literal["dwaa", "piz", "zip", "none"] = "zip",
 ) -> CorridorKeyConfig:
     return CorridorKeyConfig(
         checkpoint_dir=Path(checkpoint_dir),

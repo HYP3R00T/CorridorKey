@@ -2,29 +2,38 @@
 
 from __future__ import annotations
 
-import logging
+from pathlib import Path
 from types import TracebackType
 
 from rich.console import Console
-from rich.logging import RichHandler
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn
 
 console = Console()
 err_console = Console(stderr=True)
 
 
-def setup_logging(verbose: bool) -> None:
-    """Configure root logging to use RichHandler.
+def setup_logging(verbose: bool = False) -> Path | None:
+    """Configure logging for a CLI session.
+
+    Wires a Rich console handler (WARNING+, or DEBUG when verbose) and a
+    rotating JSON file handler (INFO+ by default) onto the root logger.
+    The file handler writes to ``~/.config/corridorkey/logs/corridorkey.log``.
 
     Args:
-        verbose: Enable DEBUG level when True, WARNING otherwise.
+        verbose: Drop the console handler to DEBUG level.
+
+    Returns:
+        Path to the active log file, or None if file logging failed.
     """
-    level = logging.DEBUG if verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format="%(message)s",
-        handlers=[RichHandler(console=err_console, show_path=False, markup=True)],
-    )
+    from corridorkey.config import load_config
+    from corridorkey.logging_setup import setup_logging as _setup
+
+    try:
+        config = load_config()
+    except Exception:
+        config = None
+
+    return _setup(verbose=verbose, config=config)
 
 
 def make_progress() -> Progress:
