@@ -32,7 +32,6 @@ from corridorkey.clip_state import ClipEntry, ClipState, scan_clips_dir
 from corridorkey.config import CorridorKeyConfig, load_config
 from corridorkey.errors import CorridorKeyError, FrameReadError, JobCancelledError, WriteFailureError
 from corridorkey.frame_io import (
-    EXR_WRITE_FLAGS,
     read_image_frame,
     read_mask_frame,
     read_video_frame_at,
@@ -43,6 +42,37 @@ from corridorkey.protocols import AlphaGenerator
 from corridorkey.validators import ensure_output_dirs, validate_frame_counts, validate_frame_read, validate_write
 
 logger = logging.getLogger(__name__)
+
+# EXR compression codec IDs (cv2 constant names not available in all builds).
+_EXR_COMPRESSION_IDS: dict[str, int] = {
+    "none": 0,
+    "rle": 1,
+    "zips": 2,
+    "zip": 3,
+    "piz": 4,
+    "pxr24": 5,
+    "dwaa": 6,
+    "dwab": 7,
+}
+
+
+def _build_exr_flags(compression: str = "dwaa") -> list[int]:
+    """Build cv2.imwrite flags list for EXR output.
+
+    Args:
+        compression: One of "none", "rle", "zips", "zip", "piz", "pxr24", "dwaa", "dwab".
+            Defaults to "dwaa" (lossy DCT, visually lossless, fast).
+
+    Returns:
+        List of ints suitable for the flags argument of cv2.imwrite.
+    """
+    codec_id = _EXR_COMPRESSION_IDS.get(compression.lower(), _EXR_COMPRESSION_IDS["dwaa"])
+    return [
+        cv2.IMWRITE_EXR_TYPE,
+        cv2.IMWRITE_EXR_TYPE_HALF,
+        cv2.IMWRITE_EXR_COMPRESSION,
+        codec_id,
+    ]
 
 
 @dataclass
@@ -55,6 +85,14 @@ class InferenceParams:
         auto_despeckle: Enable automatic matte despeckling.
         despeckle_size: Maximum speckle area in pixels to remove.
         refiner_scale: Scale factor passed to the optional refiner stage.
+        source_passthrough: Pass original source pixels through in opaque interior
+            regions. Only the edge transition band uses the model's fg prediction.
+            Preserves full source quality in solid areas.
+        edge_erode_px: Pixels to erode the interior mask inward before blending.
+            Acts as a safety buffer to avoid using original pixels where green
+            spill might contaminate.
+        edge_blur_px: Gaussian blur radius for the transition blend between source
+            and model fg. Controls smoothness of the seam.
     """
 
     input_is_linear: bool = False
@@ -62,6 +100,9 @@ class InferenceParams:
     auto_despeckle: bool = True
     despeckle_size: int = 400
     refiner_scale: float = 1.0
+    source_passthrough: bool = False
+    edge_erode_px: int = 3
+    edge_blur_px: int = 7
 
     def to_dict(self) -> dict:
         """Serialise to a plain dict (for manifest storage).
@@ -98,6 +139,11 @@ class OutputConfig:
         comp_format: File format for comp frames ("exr" or "png").
         processed_enabled: Write pre-processed input frames.
         processed_format: File format for processed frames ("exr" or "png").
+        exr_compression: EXR compression codec for all EXR outputs.
+            "dwaa" — lossy DCT, visually lossless, ~5x faster writes (default).
+            "pxr24" — lossless 24-bit, larger files, slower.
+            "zip" — lossless ZIP deflate, widely compatible.
+            "none" — uncompressed, maximum compatibility, largest files.
     """
 
     fg_enabled: bool = True
@@ -108,6 +154,7 @@ class OutputConfig:
     comp_format: str = "png"
     processed_enabled: bool = True
     processed_format: str = "exr"
+    exr_compression: str = "dwaa"  # "dwaa", "pxr24", "zip", "none"
 
     def to_dict(self) -> dict:
         """Serialise to a plain dict (for manifest storage).
@@ -551,7 +598,9 @@ class CorridorKeyService:
         validate_frame_read(mask, clip.name, frame_index, fpath)
         return mask
 
-    def _write_image(self, img: np.ndarray, path: str, fmt: str, clip_name: str, frame_index: int) -> None:
+    def _write_image(
+        self, img: np.ndarray, path: str, fmt: str, clip_name: str, frame_index: int, exr_compression: str = "dwaa"
+    ) -> None:
         """Write a single image to disk in the requested format.
 
         Handles dtype conversion: EXR expects float32, PNG expects uint8.
@@ -562,11 +611,13 @@ class CorridorKeyService:
             fmt: Target format string ("exr" or "png").
             clip_name: Clip name used in error messages.
             frame_index: Frame index used in error messages.
+            exr_compression: EXR compression codec ("dwaa", "pxr24", "zip", "none").
         """
         if fmt == "exr":
             if img.dtype != np.float32:
                 img = img.astype(np.float32) / 255.0 if img.dtype == np.uint8 else img.astype(np.float32)
-            validate_write(cv2.imwrite(path, img, EXR_WRITE_FLAGS), clip_name, frame_index, path)
+            flags = _build_exr_flags(exr_compression)
+            validate_write(cv2.imwrite(path, img, flags), clip_name, frame_index, path)
         else:
             if img.dtype != np.uint8:
                 img = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
@@ -628,7 +679,12 @@ class CorridorKeyService:
         if cfg.fg_enabled:
             fg_bgr = cv2.cvtColor(res["fg"], cv2.COLOR_RGB2BGR)
             self._write_image(
-                fg_bgr, os.path.join(dirs["fg"], f"{input_stem}.{cfg.fg_format}"), cfg.fg_format, clip_name, frame_index
+                fg_bgr,
+                os.path.join(dirs["fg"], f"{input_stem}.{cfg.fg_format}"),
+                cfg.fg_format,
+                clip_name,
+                frame_index,
+                cfg.exr_compression,
             )
         if cfg.matte_enabled:
             alpha = res["alpha"]
@@ -639,6 +695,7 @@ class CorridorKeyService:
                 cfg.matte_format,
                 clip_name,
                 frame_index,
+                cfg.exr_compression,
             )
         if cfg.comp_enabled:
             comp_bgr = cv2.cvtColor((np.clip(res["comp"], 0.0, 1.0) * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
@@ -648,6 +705,7 @@ class CorridorKeyService:
                 cfg.comp_format,
                 clip_name,
                 frame_index,
+                cfg.exr_compression,
             )
         if cfg.processed_enabled and "processed" in res:
             proc_bgra = cv2.cvtColor(res["processed"], cv2.COLOR_RGBA2BGRA)
@@ -657,6 +715,7 @@ class CorridorKeyService:
                 cfg.processed_format,
                 clip_name,
                 frame_index,
+                cfg.exr_compression,
             )
 
     def run_inference(
@@ -786,6 +845,9 @@ class CorridorKeyService:
                             auto_despeckle=params.auto_despeckle,
                             despeckle_size=params.despeckle_size,
                             refiner_scale=params.refiner_scale,
+                            source_passthrough=params.source_passthrough,
+                            edge_erode_px=params.edge_erode_px,
+                            edge_blur_px=params.edge_blur_px,
                         )
                     logger.debug("Clip '%s' frame %d: %.3fs", clip.name, i, time.monotonic() - t_frame)
 
@@ -1129,6 +1191,9 @@ class CorridorKeyService:
                 auto_despeckle=params.auto_despeckle,
                 despeckle_size=params.despeckle_size,
                 refiner_scale=params.refiner_scale,
+                source_passthrough=params.source_passthrough,
+                edge_erode_px=params.edge_erode_px,
+                edge_blur_px=params.edge_blur_px,
             )
         logger.debug("Clip '%s' frame %d: reprocess %.3fs", clip.name, frame_index, time.monotonic() - t_start)
         return res
