@@ -27,7 +27,7 @@ Integration tests that require a GPU must be marked `@pytest.mark.gpu`. Tests th
 @pytest.fixture(scope="module")
 def engine():
     """Load CorridorKeyEngine once for the entire module."""
-    from corridorkey_core.inference_engine import CorridorKeyEngine
+    from corridorkey_core.engine import CorridorKeyEngine
 
     ckpt = Path(os.environ.get("CK_CHECKPOINT_PATH", ""))
     if not ckpt.is_file():

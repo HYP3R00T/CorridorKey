@@ -1,3 +1,3 @@
 # Inference Engine
 
-::: corridorkey_core.inference_engine
+::: corridorkey_core.engine

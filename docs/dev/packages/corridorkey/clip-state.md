@@ -18,27 +18,22 @@ Every clip in CorridorKey moves through a strict state machine. The state determ
 
 ## Valid Transitions
 
-```text
-EXTRACTING -> RAW        extraction completes
-EXTRACTING -> ERROR      extraction fails
-
-RAW        -> MASKED     user provides a VideoMaMa mask
-RAW        -> READY      alpha generator produces AlphaHint
-RAW        -> ERROR      alpha generation or scan fails
-
-MASKED     -> READY      VideoMaMa generates alpha from mask
-MASKED     -> ERROR      VideoMaMa fails
-
-READY      -> COMPLETE   inference succeeds
-READY      -> ERROR      inference fails
-
-ERROR      -> RAW        retry from scratch
-ERROR      -> MASKED     retry with mask
-ERROR      -> READY      retry inference only
-ERROR      -> EXTRACTING retry extraction
-
-COMPLETE   -> READY      reprocess with different params
-```
+| From | To | Condition |
+|---|---|---|
+| `EXTRACTING` | `RAW` | extraction completes |
+| `EXTRACTING` | `ERROR` | extraction fails |
+| `RAW` | `MASKED` | user provides a VideoMaMa mask |
+| `RAW` | `READY` | alpha generator produces AlphaHint |
+| `RAW` | `ERROR` | alpha generation or scan fails |
+| `MASKED` | `READY` | VideoMaMa generates alpha from mask |
+| `MASKED` | `ERROR` | VideoMaMa fails |
+| `READY` | `COMPLETE` | inference succeeds |
+| `READY` | `ERROR` | inference fails |
+| `ERROR` | `RAW` | retry from scratch |
+| `ERROR` | `MASKED` | retry with mask |
+| `ERROR` | `READY` | retry inference only |
+| `ERROR` | `EXTRACTING` | retry extraction |
+| `COMPLETE` | `READY` | reprocess with different params |
 
 Any transition not listed above raises `InvalidStateTransitionError`.
 

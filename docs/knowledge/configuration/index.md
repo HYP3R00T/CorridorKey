@@ -1,12 +1,12 @@
 # Configuration
 
-CorridorKey is configured through `CorridorKeyConfig`, a Pydantic model that loads settings from multiple sources in priority order.
+CorridorKey is configured through a single configuration model that loads settings from multiple sources in priority order.
 
 ## Resolution Order
 
 Settings are resolved from lowest to highest priority:
 
-1. Model field defaults (defined in `CorridorKeyConfig`).
+1. Model field defaults.
 2. Global user config at `~/.config/corridorkey/corridorkey.yaml`.
 3. Project config at `./corridorkey.yaml` in the current working directory.
 4. Environment variables prefixed with `CORRIDORKEY_`.
@@ -46,7 +46,7 @@ Run `corridorkey config init` to generate a config file at the default location.
 
 ### Inference Parameters
 
-These become the defaults for `InferenceParams` when calling `service.default_inference_params()`.
+These are the defaults applied during the inference and postprocessing stages.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -61,7 +61,7 @@ These become the defaults for `InferenceParams` when calling `service.default_in
 
 ### Output Formats
 
-These become the defaults for `OutputConfig` when calling `service.default_output_config()`.
+These are the defaults applied when writing output files.
 
 | Parameter | Default | Options | Description |
 |---|---|---|---|
@@ -71,47 +71,9 @@ These become the defaults for `OutputConfig` when calling `service.default_outpu
 | `processed_format` | `png` | `exr` | Processed RGBA output format. EXR only. |
 | `exr_compression` | `dwaa` | `dwaa`, `piz`, `zip`, `none` | EXR compression codec applied to all EXR outputs. |
 
-## CLI Flags
+## CLI Flags and Environment Variables
 
-All parameters are also exposed as CLI flags on the `corridorkey process` command. CLI flags are the highest-priority override.
-
-| Flag | Config field |
-|---|---|
-| `--device` | `device` |
-| `--opt-mode` | `optimization_mode` |
-| `--precision` | `precision` |
-| `--despill` | `despill_strength` |
-| `--despeckle / --no-despeckle` | `auto_despeckle` |
-| `--despeckle-size` | `despeckle_size` |
-| `--refiner` | `refiner_scale` |
-| `--linear` | `input_is_linear` |
-| `--source-passthrough / --no-source-passthrough` | `source_passthrough` |
-| `--edge-erode` | `edge_erode_px` |
-| `--edge-blur` | `edge_blur_px` |
-| `--fg-format` | `fg_format` |
-| `--matte-format` | `matte_format` |
-| `--comp-format` | `comp_format` |
-| `--exr-compression` | `exr_compression` |
-
-## Environment Variables
-
-Any config field can be set via an environment variable prefixed with `CORRIDORKEY_`. For example:
-
-```shell
-CORRIDORKEY_DEVICE=cuda
-CORRIDORKEY_OPTIMIZATION_MODE=lowvram
-CORRIDORKEY_PRECISION=bf16
-```
-
-Two additional environment variables control engine behaviour directly and bypass the config system:
-
-- `CORRIDORKEY_OPT_MODE` - overrides `optimization_mode` at the engine level.
-- `CORRIDORKEY_BACKEND` - forces the inference backend (`torch` or `mlx`).
-
-## Source Code
-
-- Config model: `CorridorKeyConfig` in [corridorkey/config.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/config.py)
-- CLI flags: `process` command in [corridorkey-cli/commands/process.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-cli/src/corridorkey_cli/commands/process.py)
+All parameters are exposed as CLI flags on the `corridorkey process` command and as environment variables prefixed with `CORRIDORKEY_`. CLI flags are the highest-priority override. See the [User Guide](../../guide/processing.md) for usage.
 
 ## Related Documents
 

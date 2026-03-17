@@ -4,24 +4,22 @@ CorridorKey processes footage through six sequential stages. Each stage has a de
 
 ## The Six Stages
 
-| Stage | Name | Package | What it does |
-|---|---|---|---|
-| 1 | [Load frame](load-frame.md) | corridorkey | Reads one image frame and its alpha hint mask from disk. Normalises both to float32 sRGB. |
-| 2 | [Generate masks](generate-masks.md) | corridorkey | Generates alpha hint masks for a frame sequence using an external generator. Not yet implemented. |
-| 3 | [Preprocess](preprocess.md) | corridorkey-core | Resizes, normalises, and stacks image and mask into a model-ready tensor. |
-| 4 | [Infer](infer.md) | corridorkey-core | Runs the model forward pass. Produces raw alpha and foreground predictions. |
-| 5 | [Postprocess](postprocess.md) | corridorkey-core | Despeckles, despills, composites, and applies source passthrough. |
-| 6 | [Write outputs](write-outputs.md) | corridorkey | Writes all enabled output images for one processed frame to disk. |
+| Stage | Name | What it does |
+|---|---|---|
+| 1 | [Load frame](load-frame.md) | Reads one image frame and its alpha hint mask from disk. Normalises both to float32 sRGB. |
+| 2 | [Generate masks](generate-masks.md) | Generates alpha hint masks for a frame sequence using an external generator. Not yet implemented. |
+| 3 | [Preprocess](preprocess.md) | Resizes, normalises, and stacks image and mask into a model-ready tensor. |
+| 4 | [Infer](infer.md) | Runs the model forward pass. Produces raw alpha and foreground predictions. |
+| 5 | [Postprocess](postprocess.md) | Despeckles, despills, composites, and applies source passthrough. |
+| 6 | [Write outputs](write-outputs.md) | Writes all enabled output images for one processed frame to disk. |
 
-## Package Boundary
+## Separation of Concerns
 
-Stages split across two packages based on one rule: does the stage touch the filesystem?
+Stages split into two groups based on one rule: does the stage touch the filesystem?
 
-Stages 1, 2, and 6 touch the filesystem. They live in `corridorkey`.
+Stages 1, 2, and 6 touch the filesystem - reading frames, reading masks, writing outputs.
 
-Stages 3, 4, and 5 are pure compute. They take arrays and tensors in and return arrays and tensors out. They live in `corridorkey-core` and have no filesystem dependency.
-
-This boundary means the core package can be tested in isolation with synthetic arrays, and the application layer can change how frames are loaded or written without touching inference logic.
+Stages 3, 4, and 5 are pure compute. They take arrays and tensors in and return arrays and tensors out, with no filesystem dependency. This boundary means the compute stages can be reasoned about and tested in isolation from I/O concerns.
 
 ## Data Flow
 

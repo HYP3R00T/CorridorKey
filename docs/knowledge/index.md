@@ -4,7 +4,7 @@ Theory, design decisions, and internals for the CorridorKey pipeline.
 
 This section is for anyone who wants to understand how CorridorKey works, not just how to use it. It covers the six pipeline stages, the data contracts between them, the configuration system, and the reasoning behind key implementation decisions.
 
-No prior knowledge of the codebase is required. Code references link to source files where relevant.
+No prior knowledge of the codebase is required.
 
 ## Documents in This Section
 

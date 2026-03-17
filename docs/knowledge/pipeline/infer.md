@@ -7,27 +7,24 @@ This stage is the GPU-bound core of the pipeline. Everything before it is prepar
 ## What It Does
 
 1. Casts the input tensor to the model's precision dtype (fp16, bf16, or fp32).
-2. Optionally registers a forward hook on the CNN refiner to scale or tile its output.
-3. Runs the model forward pass under `torch.autocast` and `torch.inference_mode`.
-4. Extracts alpha and foreground tensors from the model output dict.
-5. Moves both to CPU and converts to NumPy float32 arrays.
-6. Returns a `RawPrediction`.
+2. Optionally registers a hook on the CNN refiner to scale or tile its output.
+3. Runs the model forward pass with inference-mode optimisations active.
+4. Extracts alpha and foreground tensors from the model output.
+5. Moves both to CPU and converts to float32 arrays.
+6. Returns a `RawPrediction` contract.
 
 ## Input
 
-A `PreprocessedTensor` from stage 3, plus:
-
-- `engine` - a loaded `CorridorKeyEngine` (or MLX adapter). Created by `create_engine()`.
-- `refiner_scale` - multiplier on the CNN refiner's delta corrections. Default 1.0.
+A `PreprocessedTensor` from stage 3, plus a scale factor controlling how much of the CNN refiner's correction is applied (default 1.0).
 
 ## Output
 
-A `RawPrediction` with:
+A `RawPrediction` contract carrying:
 
-- `alpha` - predicted alpha matte `[img_size, img_size, 1]`, float32, linear, values 0.0-1.0.
-- `fg` - predicted foreground RGB `[img_size, img_size, 3]`, float32, sRGB straight, values 0.0-1.0.
-- `img_size` - model resolution.
-- `source_h`, `source_w` - original frame dimensions carried through for stage 5.
+- The predicted alpha matte `[img_size, img_size, 1]`, float32, linear, values 0.0-1.0.
+- The predicted foreground RGB `[img_size, img_size, 3]`, float32, sRGB straight, values 0.0-1.0.
+- The model resolution.
+- The original frame dimensions carried through for stage 5.
 
 ## Model Architecture
 
@@ -43,9 +40,9 @@ The refiner corrects edge precision. The decoders understand what is foreground 
 
 ## Floating Point Precision
 
-The forward pass runs under `torch.autocast`. PyTorch decides per-operation whether to use fp16 or fp32 based on numerical stability requirements. Matrix multiplications and convolutions run in fp16 (or bf16 on supported hardware). Softmax, layer norm, and exponentials run in fp32.
+The forward pass uses mixed precision. The framework decides per-operation whether to use the configured reduced precision or fall back to full float32, based on numerical stability requirements. Matrix multiplications and convolutions run in reduced precision. Softmax, layer norm, and exponentials always run in full float32.
 
-The model precision (weight dtype) is set at engine creation time via the `precision` parameter on `create_engine()`. See [precision modes](../improvements/precision-modes.md) for details.
+The model precision is set at engine creation time. See [precision modes](../improvements/precision-modes.md) for details.
 
 ## refiner_scale
 
@@ -72,13 +69,6 @@ Do not use values above 1.0 in production. They amplify corrections beyond the t
 MPS (Apple Silicon via PyTorch) always forces `lowvram` and disables `torch.compile`. Triton does not support Metal.
 
 See [optimization modes](../improvements/optimization-modes.md) for full details.
-
-## Source Code
-
-- Stage function: `stage_4_infer` in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py)
-- Engine: `CorridorKeyEngine` in [corridorkey-core/inference_engine.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/inference_engine.py)
-- Engine factory: `create_engine` in [corridorkey-core/engine_factory.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/engine_factory.py)
-- Contract: `RawPrediction` in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py)
 
 ## Related Documents
 

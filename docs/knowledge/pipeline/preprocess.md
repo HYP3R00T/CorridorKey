@@ -9,26 +9,25 @@ This is the first stage in `corridorkey-core`. It has no filesystem access. Inpu
 1. Resizes the image to `img_size x img_size` (default 2048) using bilinear interpolation.
 2. Resizes the mask to the same dimensions.
 3. Applies ImageNet normalisation to the image: `(pixel - mean) / std`.
-4. Concatenates the normalised image and mask into a single `[H, W, 4]` array.
-5. Transposes to `[1, 4, H, W]` (PyTorch channels-first convention).
-6. Moves the tensor to the target device (CUDA, MPS, or CPU).
+4. Concatenates the normalised image and mask into a single four-channel array.
+5. Transposes to channels-first layout for the model.
+6. Moves the tensor to the target compute device.
 
 ## Input
 
-- `image` - RGB float32 `[H, W, 3]` sRGB, values 0.0-1.0. From stage 1.
-- `mask` - grayscale float32 `[H, W, 1]` linear, values 0.0-1.0. From stage 1.
-- `source_h`, `source_w` - original frame dimensions, carried through for upsampling in stage 5.
-- `img_size` - square resolution to resize to. Default 2048. Must match the model's training resolution.
-- `device` - torch device string ("cuda", "mps", "cpu").
+- The image and mask arrays from stage 1.
+- The target square resolution (default 2048, must match the model's training resolution).
+- The compute device to place the tensor on.
+- The original frame dimensions, carried through for upsampling in stage 5.
 
 ## Output
 
-A `PreprocessedTensor` with:
+A `PreprocessedTensor` contract carrying:
 
-- `tensor` - float32 tensor `[1, 4, img_size, img_size]` on the target device.
-- `img_size` - the resolution the tensor was prepared at.
-- `device` - the device string.
-- `source_h`, `source_w` - original frame dimensions carried through for stage 5.
+- A float32 tensor `[1, 4, img_size, img_size]` on the target device.
+- The resolution the tensor was prepared at.
+- The device identifier.
+- The original frame dimensions carried through for stage 5.
 
 ## ImageNet Normalisation
 
@@ -48,14 +47,9 @@ The current implementation squishes the frame to `img_size x img_size` regardles
 
 Letterboxing (padding the shorter dimension to preserve aspect ratio) is a planned improvement. See [improvements](../improvements/index.md) for details.
 
-## img_size
+## Model Resolution
 
-The model was trained at 2048x2048. Do not change `img_size` unless retraining the model. VRAM scales with the square of this value. For high-resolution footage, tiling is the correct approach rather than increasing `img_size`.
-
-## Source Code
-
-- Stage function: `stage_3_preprocess` in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py)
-- Contract: `PreprocessedTensor` in the same file.
+The model was trained at 2048x2048. This is the resolution all input frames are resized to before inference. VRAM usage scales with the square of this value. For high-resolution footage, tiling is the correct approach rather than increasing the resolution.
 
 ## Related Documents
 

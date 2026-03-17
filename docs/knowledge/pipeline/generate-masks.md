@@ -4,7 +4,7 @@ Stage 2 generates alpha hint masks for a frame sequence using an external mask g
 
 ## Status
 
-Stage 2 is not yet implemented. The stage function exists as a placeholder and raises `NotImplementedError` when called without a generator. The pipeline checks for existing masks before calling this stage and skips it if the mask folder is already populated.
+Stage 2 is not yet implemented. The pipeline checks for existing masks before calling this stage and skips it if the mask folder is already populated.
 
 ## Purpose
 
@@ -17,7 +17,7 @@ Without a mask, the model receives a blank input (all 0.5, meaning everything is
 When implemented, stage 2 will:
 
 1. Check whether the output mask directory is already populated. If yes, skip.
-2. Delegate to an external generator that implements the `AlphaGenerator` protocol.
+2. Delegate to an external mask generator.
 3. The generator writes mask frames to the output directory.
 4. Stage 1 reads those mask frames when processing each frame.
 
@@ -48,11 +48,6 @@ What makes a bad mask:
 - Unknown band too tight or too loose.
 - Noisy - random pixels flipping between foreground and background.
 - Wrong threshold - green screen pixels classified as foreground, or subject pixels as background.
-
-## Source Code
-
-- Stage function: `stage_2_generate_masks` in [corridorkey/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/stages.py)
-- Generator protocol: `AlphaGenerator` in [corridorkey/protocols.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/protocols.py)
 
 ## Related Documents
 

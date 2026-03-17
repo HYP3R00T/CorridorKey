@@ -20,10 +20,6 @@ The tensor has four channels, not three. The fourth channel is the alpha hint ma
 
 `source_h` and `source_w` are not used by stage 4. They are carried through so stage 5 can upsample the model's predictions back to the original frame dimensions without needing to pass the original frame separately.
 
-## Source Code
-
-Defined in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py).
-
 ## Related Documents
 
 - [Preprocess](../pipeline/preprocess.md) - Stage 3, which produces this contract.

@@ -16,7 +16,7 @@ The CNN refiner processes the full 2048x2048 tensor in one pass in `speed` mode.
 
 ## Auto-Detection
 
-`auto` mode probes VRAM using `pynvml` at the driver level before the CUDA context is initialised. This matters because a mask generator (for example, GVM) may have just released the GPU before the inference engine initialises. `torch.cuda.get_device_properties()` was found to stall in that handoff window. `pynvml` does not have that problem.
+`auto` mode probes available VRAM at the driver level before the compute context is initialised. This matters because a mask generator may have just released the GPU before the inference engine initialises, and querying device properties through the compute framework can stall in that handoff window. Driver-level probing avoids that problem.
 
 The threshold is 12 GB. Below 12 GB free VRAM, `auto` selects `lowvram`. At or above 12 GB, it selects `speed`.
 
@@ -34,15 +34,7 @@ CORRIDORKEY_OPT_MODE=lowvram corridorkey process /path/to/clips
 
 ## torch.compile
 
-`torch.compile` uses Triton to JIT-compile the model's compute graph into optimised GPU kernels. The first run pays a compilation cost (typically 30-60 seconds). Subsequent runs use the cached compiled kernels and are faster.
-
-The compiled kernel cache is stored at `~/.cache/corridorkey/torch_compile`. If compilation fails for any reason, the engine falls back to eager mode automatically.
-
-## Source Code
-
-- Mode resolution: `CorridorKeyEngine.__init__` in [corridorkey-core/inference_engine.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/inference_engine.py)
-- Tiled refiner: `CorridorKeyEngine._run_refiner_tiled` in the same file.
-- VRAM probe: `_probe_vram_gb` in the same file.
+`torch.compile` uses Triton to JIT-compile the model's compute graph into optimised GPU kernels. The first run pays a compilation cost (typically 30-60 seconds). Subsequent runs use the cached compiled kernels and are faster. If compilation fails for any reason, the engine falls back to eager mode automatically.
 
 ## Related Documents
 

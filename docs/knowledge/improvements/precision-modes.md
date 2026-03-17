@@ -21,17 +21,17 @@ bfloat16 was developed by Google Brain to address this. It uses the same number 
 
 ## How Autocast Works
 
-The forward pass runs under `torch.autocast`. PyTorch decides per-operation whether to use the configured precision or fall back to float32, based on numerical stability requirements.
+The forward pass uses mixed precision. The framework decides per-operation whether to use the configured precision or fall back to float32, based on numerical stability requirements.
 
 Operations that run in reduced precision: matrix multiplications, convolutions, linear layers.
 
 Operations that always run in float32: softmax, layer norm, batch norm, exponentials, logarithms.
 
-This means `precision` controls the weight dtype and the default for compute-heavy operations. It does not force every operation into reduced precision.
+This means `precision` controls the weight format and the default for compute-heavy operations. It does not force every operation into reduced precision.
 
 ## TF32
 
-On Ampere+ GPUs, `torch.set_float32_matmul_precision('high')` is set automatically. This enables TF32 for matrix multiplications. TF32 is not a storage format - it is a compute mode that uses 10-bit mantissa math for matmuls while storing values as float32. It is transparent to the user and provides a speed improvement on Ampere+ hardware with no code changes.
+On Ampere+ GPUs, TF32 is enabled automatically for matrix multiplications. TF32 is not a storage format - it is a compute mode that uses 10-bit mantissa math for matrix multiplications while storing values as float32. It is transparent to the user and provides a speed improvement on Ampere+ hardware with no configuration required.
 
 ## Auto-Detection
 
@@ -41,11 +41,6 @@ On Ampere+ GPUs, `torch.set_float32_matmul_precision('high')` is set automatical
 - Apple Silicon (MPS or MLX backend) - selects bf16.
 - Older NVIDIA GPUs - selects fp16.
 - CPU - selects fp32.
-
-## Source Code
-
-- Precision resolution: `_resolve_precision` in [corridorkey-core/engine_factory.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/engine_factory.py)
-- Autocast usage: `CorridorKeyEngine.process_frame` in [corridorkey-core/inference_engine.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/inference_engine.py)
 
 ## Related Documents
 

@@ -1,6 +1,6 @@
 # Postprocess
 
-Stage 5 takes the raw model predictions and produces four final outputs ready for delivery. It runs entirely on CPU in NumPy. No GPU access, no filesystem access.
+Stage 5 takes the raw model predictions and produces four final outputs ready for delivery. It runs entirely on CPU with no GPU access and no filesystem access.
 
 ## What It Does
 
@@ -13,16 +13,11 @@ Stage 5 takes the raw model predictions and produces four final outputs ready fo
 
 ## Input
 
-A `RawPrediction` from stage 4, plus:
-
-- `source_image` - the original source frame `[H, W, 3]` float32 sRGB. Used only when source passthrough is enabled.
-- `source_is_linear` - whether the source was originally in linear light.
-- `params` - a `PostprocessParams` controlling each step.
-- `stem` - filename stem carried through to the output.
+A `RawPrediction` from stage 4, plus the original source frame (used only when source passthrough is enabled) and a `PostprocessParams` controlling each step.
 
 ## Output
 
-A `ProcessedFrame` with four arrays at original source resolution:
+A `ProcessedFrame` contract with four arrays at original source resolution:
 
 - `alpha` - alpha matte `[H, W, 1]`, float32, linear, values 0.0-1.0.
 - `fg` - foreground RGB `[H, W, 3]`, float32, sRGB straight (unpremultiplied).
@@ -61,12 +56,6 @@ Controlled by `source_passthrough` (bool), `edge_erode_px` (int), and `edge_blur
 - `fg` - sRGB straight. The model predicts in sRGB. Despill operates in sRGB. Source passthrough blends in sRGB.
 - `comp` - sRGB. The checkerboard is generated in sRGB. Compositing happens in linear then converts back to sRGB for the preview.
 - `processed` - linear premultiplied. The fg is converted from sRGB to linear before premultiplication. This is the standard format for NLE and VFX compositing.
-
-## Source Code
-
-- Stage function: `stage_5_postprocess` in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py)
-- Compositing utilities: [corridorkey-core/compositing.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/compositing.py)
-- Contract: `PostprocessParams` and `ProcessedFrame` in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py)
 
 ## Related Documents
 

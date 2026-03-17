@@ -4,14 +4,13 @@ Write effective documentation using Markdown and Zensical features. Follow [Docu
 
 ## Current Docs Layout
 
-The repository currently maintains the docs pages under `docs/` and `docs/dev/`.
+The repository maintains docs under `docs/`, `docs/dev/`, and `docs/knowledge/`.
 
 - `docs/index.md` - Documentation home
-- `docs/dev/authoring-documentation.md` - Authoring guidance
-- `docs/dev/developer-setup.md` - Setup guidance
-- `docs/dev/naming-conventions.md` - Naming conventions for code identifiers
-- `docs/dev/resources.md` - Tooling and references
-- `docs/dev/documentation-principles/` - Standards and rules
+- `docs/dev/contributing/authoring-documentation.md` - Authoring guidance
+- `docs/dev/setup/index.md` - Developer setup
+- `docs/dev/contributing/naming-conventions.md` - Naming conventions for code identifiers
+- `docs/dev/contributing/documentation-principles/` - Standards and rules
 
 ## Markdown Essentials
 
@@ -25,7 +24,7 @@ The repository currently maintains the docs pages under `docs/` and `docs/dev/`.
 
 | Type | Format | Use When |
 |------|--------|----------|
-| Internal docs | `Link Text -> path/to/file.md` | Linking to other docs |
+| Internal docs | `[Link Text](path/to/file.md)` | Linking to other docs |
 | Source code | Full GitHub link to the target file | Referencing code in passing |
 | External | `[Link Text](https://url.com)` | Third-party resources |
 

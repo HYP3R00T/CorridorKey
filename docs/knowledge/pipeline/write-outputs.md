@@ -6,16 +6,15 @@ Stage 6 writes all enabled output images for one processed frame to disk. It is 
 
 For each enabled output type, it:
 
-1. Converts the array to the correct dtype for the target format (float32 for EXR, uint8 for PNG).
-2. Converts from RGB to BGR for OpenCV (which expects BGR channel order).
-3. Calls `cv2.imwrite` with the appropriate flags.
-4. Raises `OSError` if the write fails.
+1. Converts the array to the correct bit depth for the target format (full float for EXR, 8-bit for PNG).
+2. Writes the file to disk.
+3. Raises an error if the write fails.
 
 All colour space conversions happened in stage 5. This stage only writes.
 
 ## Input
 
-A `ProcessedFrame` from stage 5, plus a `WriteConfig` describing which outputs to write and where.
+A `ProcessedFrame` from stage 5, along with configuration describing which output types to write and where.
 
 ## Output Types
 
@@ -74,12 +73,6 @@ For a ProRes 4444 delivery of the foreground:
 ```shell
 ffmpeg -framerate 24 -i Output/FG/%06d.exr -c:v prores_ks -profile:v 4444 fg.mov
 ```
-
-## Source Code
-
-- Stage function: `stage_6_write_outputs` in [corridorkey/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/stages.py)
-- Contract: `WriteConfig` in the same file.
-- Output directory creation: `ensure_output_dirs` in [corridorkey/validators.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/validators.py)
 
 ## Related Documents
 

@@ -37,7 +37,7 @@ Tier 3 would validate each frame as it enters the processing queue. If a frame f
 
 ## ValidationResult
 
-`validate_job_inputs` returns a `ValidationResult` with three fields:
+The validation result carries three fields:
 
 - `ok` - true if all checks passed and the job can proceed.
 - `errors` - fatal problems that must be resolved before processing.
@@ -51,13 +51,6 @@ The default minimum VRAM requirement is 6.0 GB. This is a conservative floor for
 
 - `speed` mode requires more VRAM (full 2048x2048 refiner pass).
 - `lowvram` mode can run on less (tiled refiner).
-
-The threshold can be overridden by passing `min_vram_gb` to `validate_job_inputs`.
-
-## Source Code
-
-- Validation function: `validate_job_inputs` in [corridorkey/validators.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/validators.py)
-- Called from: `process` command in [corridorkey-cli/commands/process.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-cli/src/corridorkey_cli/commands/process.py)
 
 ## Related Documents
 

@@ -67,4 +67,4 @@ packages/corridorkey/
 - [Integration Tests](integration-tests.md)
 - [Property-Based Tests](property-tests.md)
 - [Hardware-Gated Tests](hardware-gated.md)
-- [Developer Setup](../developer-setup.md)
+- [Developer Setup](../setup/index.md)

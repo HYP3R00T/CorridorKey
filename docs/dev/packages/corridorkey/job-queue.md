@@ -20,13 +20,13 @@ CorridorKey's inference model requires approximately 22.7 GB of VRAM on a 24 GB 
 
 ## Job Lifecycle
 
-A job moves through these states:
+A job moves through these states in order:
 
-```text
-QUEUED -> RUNNING -> COMPLETED
-                  -> CANCELLED
-                  -> FAILED
-```
+1. `QUEUED` - submitted and waiting for the worker thread.
+2. `RUNNING` - the worker thread has picked it up.
+3. `COMPLETED` - finished successfully.
+4. `CANCELLED` - cancelled before or during execution.
+5. `FAILED` - an exception was raised during execution.
 
 ## Deduplication vs Replacement
 

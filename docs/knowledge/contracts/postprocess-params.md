@@ -18,13 +18,11 @@ This is not a data carrier between stages. It is the configuration bag for stage
 
 ## Relationship to InferenceParams
 
-`InferenceParams` is the application-layer configuration object used by the CLI and GUI. `PostprocessParams` is the core-layer equivalent used by stage 5.
-
-The bridge function `inference_params_to_postprocess` in [corridorkey/service.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/service.py) converts between them. This is the only place that mapping lives.
+`InferenceParams` is the application-layer configuration object used by the CLI and GUI. `PostprocessParams` is the core-layer equivalent used by stage 5. The mapping between them is handled by the service layer and is the only place that translation lives.
 
 ## Source Code
 
-Defined in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py).
+Defined in [corridorkey-core/contracts.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/contracts.py).
 
 ## Related Documents
 

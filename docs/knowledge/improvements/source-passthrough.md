@@ -41,11 +41,6 @@ It is less critical when:
 
 The MLX backend applies a similar blending operation automatically because the MLX model's colour fidelity in opaque interior regions is lower than the Torch model. On the Torch path, source passthrough is opt-in via the `source_passthrough` parameter.
 
-## Source Code
-
-- Implementation: `apply_source_passthrough` in [corridorkey-core/compositing.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/compositing.py)
-- Called from: `stage_5_postprocess` in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py)
-
 ## Related Documents
 
 - [Postprocess](../pipeline/postprocess.md) - Stage 5, where source passthrough runs.

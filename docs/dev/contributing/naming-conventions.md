@@ -31,7 +31,7 @@ Use lowercase with underscores. Names must be gerunds or nouns that describe wha
 (GOOD)
 
 - `compositing.py` - performs compositing operations
-- `inference_engine.py` - runs model inference
+- `engine.py` - runs model inference
 - `model_transformer.py` - defines the transformer model
 
 (AVOID)

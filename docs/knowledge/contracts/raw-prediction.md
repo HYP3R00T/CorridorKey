@@ -20,10 +20,6 @@ Both arrays are at model resolution (`img_size x img_size`), not at source resol
 
 `alpha` and `fg` are the direct outputs of the model's decoder heads after the CNN refiner has applied its corrections. No despeckle, no despill, no compositing has been applied yet.
 
-## Source Code
-
-Defined in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py).
-
 ## Related Documents
 
 - [Infer](../pipeline/infer.md) - Stage 4, which produces this contract.

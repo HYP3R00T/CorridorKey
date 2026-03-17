@@ -26,10 +26,6 @@ All arrays are at original source resolution (`source_h x source_w`). Stage 5 up
 
 `fg` is straight (unpremultiplied) sRGB. It is useful if you want to handle premultiplication yourself downstream, or if you need the foreground in sRGB for a specific workflow.
 
-## Source Code
-
-Defined in [corridorkey-core/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey-core/src/corridorkey_core/stages.py).
-
 ## Related Documents
 
 - [Postprocess](../pipeline/postprocess.md) - Stage 5, which produces this contract.

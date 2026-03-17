@@ -21,10 +21,6 @@ The `image` field always contains sRGB. If the source was in linear light, stage
 
 The `mask` field is always `[H, W, 1]` - a single channel with an explicit trailing dimension. Stage 3 expects this shape.
 
-## Source Code
-
-Defined in [corridorkey/stages.py](https://github.com/edenaion/CorridorKey/blob/main/packages/corridorkey/src/corridorkey/stages.py).
-
 ## Related Documents
 
 - [Load frame](../pipeline/load-frame.md) - Stage 1, which produces this contract.
