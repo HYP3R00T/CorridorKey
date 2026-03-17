@@ -232,6 +232,7 @@ class CorridorKeyEngine:  # pragma: no cover
             "device": self.device.type,
             "optimization_mode": self._resolved_optimization_mode,
             "precision": precision_map.get(self.model_precision, str(self.model_precision)),
+            "img_size": str(self.img_size),
         }
 
     def _load_model(self) -> GreenFormer:

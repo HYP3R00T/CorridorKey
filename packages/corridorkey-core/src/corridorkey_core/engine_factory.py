@@ -218,6 +218,7 @@ class _MLXEngineAdapter:  # pragma: no cover
             "device": "apple-silicon",
             "optimization_mode": opt_mode,
             "precision": "mlx-default",
+            "img_size": "unknown",
         }
 
     def process_frame(
@@ -369,11 +370,12 @@ def create_engine(
     resolved_device = device or "cpu"
     model_dtype = _resolve_precision(precision, resolved_device)
     logger.info(  # pragma: no cover
-        "Torch engine request: %s (device=%s, optimization=%s, precision=%s)",
+        "Torch engine request: %s (device=%s, optimization=%s, precision=%s, img_size=%d)",
         ckpt.name,
         resolved_device,
         optimization_mode,
         model_dtype,
+        img_size,
     )
     return CorridorKeyEngine(
         checkpoint_path=ckpt,
