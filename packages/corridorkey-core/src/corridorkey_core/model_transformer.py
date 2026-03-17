@@ -105,7 +105,9 @@ class DecoderHead(nn.Module):
         )
 
         fused_features = self.linear_fuse(torch.cat([proj_c4, proj_c3, proj_c2, proj_c1], dim=1))
-        fused_features = self.bn(fused_features)
+        # BatchNorm2d does not support bf16; upcast to match BN weight dtype then restore.
+        bn_dtype = next(self.bn.parameters()).dtype
+        fused_features = self.bn(fused_features.to(bn_dtype)).to(proj_c1.dtype)
         fused_features = self.relu(fused_features)
 
         x = self.dropout(fused_features)
@@ -299,13 +301,13 @@ class GreenFormer(nn.Module):
         patched_conv.weight.data[:, 3:, :, :] = 0.0  # extra channels start at zero to avoid disrupting RGB features
 
         if bias is not None:
-            patched_conv.bias.data = bias  # ty:ignore[invalid-assignment]
+            patched_conv.bias.data = bias
 
         # Replace in module
         try:
-            self.encoder.model.patch_embed.proj = patched_conv  # ty:ignore[unresolved-attribute, invalid-assignment]
+            self.encoder.model.patch_embed.proj = patched_conv
         except AttributeError:
-            self.encoder.patch_embed.proj = patched_conv  # ty:ignore[invalid-assignment]
+            self.encoder.patch_embed.proj = patched_conv
 
         logger.info("Patched input layer: 3 -> %d channels (extra initialized to 0)", in_channels)
 
@@ -346,7 +348,9 @@ class GreenFormer(nn.Module):
         # The refiner predicts additive delta logits, not absolute values.
         # Adding in logit space allows unbounded corrections without sigmoid saturation.
         if self.use_refiner and self.refiner is not None:
-            delta_logits = self.refiner(rgb_input, coarse_pred)
+            # Refiner weights are kept in float32 (GroupNorm bf16 unsupported).
+            # Upcast inputs to match, then cast result back.
+            delta_logits = self.refiner(rgb_input.float(), coarse_pred.float()).to(coarse_pred.dtype)
         else:
             delta_logits = torch.zeros_like(coarse_pred)
 

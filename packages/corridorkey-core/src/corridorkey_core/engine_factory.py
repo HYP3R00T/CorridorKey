@@ -270,7 +270,8 @@ VALID_PRECISIONS = ("auto", "fp16", "bf16", "fp32")
 def _resolve_precision(precision: str, device: str) -> torch.dtype:
     """Resolve the model weight dtype from a precision string.
 
-    "auto" selects BF16 on Ampere+ CUDA or Apple Silicon MPS, FP16 otherwise.
+    "auto" selects FP32 on CPU, BF16 on Ampere+ CUDA or Apple Silicon MPS,
+    and FP16 for older CUDA GPUs.
 
     Args:
         precision: One of "auto", "fp16", "bf16", "fp32".
@@ -290,6 +291,9 @@ def _resolve_precision(precision: str, device: str) -> torch.dtype:
 
     # Auto-detect: prefer BF16 on hardware that supports it natively.
     dev = torch.device(device)
+    if dev.type == "cpu":
+        logger.info("Precision auto -> fp32 (CPU)")
+        return torch.float32
     if dev.type == "mps":
         logger.info("Precision auto -> bf16 (Apple Silicon MPS)")
         return torch.bfloat16
@@ -301,8 +305,8 @@ def _resolve_precision(precision: str, device: str) -> torch.dtype:
             return torch.bfloat16
         logger.info("Precision auto -> fp16 (pre-Ampere GPU: %s)", props.name)
         return torch.float16
-    logger.info("Precision auto -> fp16 (default)")
-    return torch.float16
+    logger.info("Precision auto -> fp32 (default)")
+    return torch.float32
 
 
 def create_engine(

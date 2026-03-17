@@ -202,10 +202,10 @@ class TestResolvePrecision:
         """VALID_PRECISIONS must include all accepted string values."""
         assert set(VALID_PRECISIONS) == {"auto", "fp16", "bf16", "fp32"}
 
-    def test_auto_on_cpu_returns_fp16(self):
-        """'auto' on CPU must fall back to fp16 (no BF16 hardware detection on CPU)."""
+    def test_auto_on_cpu_returns_fp32(self):
+        """'auto' on CPU must resolve to fp32 for stable and performant CPU inference."""
         result = _resolve_precision("auto", "cpu")
-        assert result == torch.float16
+        assert result == torch.float32
 
     def test_auto_on_mps_returns_bf16(self):
         """'auto' on MPS must return bfloat16 (Apple Silicon supports BF16 natively)."""
@@ -236,8 +236,8 @@ class TestResolvePrecision:
             result = _resolve_precision("auto", "cuda")
         assert result == torch.float16
 
-    def test_auto_on_cuda_unavailable_returns_fp16(self):
-        """'auto' when CUDA reports unavailable must fall back to fp16."""
+    def test_auto_on_cuda_unavailable_returns_fp32(self):
+        """'auto' when CUDA is unavailable must fall back to fp32."""
         with patch("torch.cuda.is_available", return_value=False):
             result = _resolve_precision("auto", "cuda")
-        assert result == torch.float16
+        assert result == torch.float32
