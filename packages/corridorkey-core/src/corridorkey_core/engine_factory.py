@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from corridorkey_core.inference_engine import CorridorKeyEngine
+    from corridorkey_core.pipeline.engine import CorridorKeyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +218,9 @@ class _MLXEngineAdapter:  # pragma: no cover
         despill_strength: float = 1.0,
         auto_despeckle: bool = True,
         despeckle_size: int = 400,
+        source_passthrough: bool = False,
+        edge_erode_px: int = 3,
+        edge_blur_px: int = 7,
     ) -> dict:
         """Delegate to the MLX engine then normalize output to the Torch contract."""
         # MLX engine expects uint8 - convert if float
@@ -241,7 +244,18 @@ class _MLXEngineAdapter:  # pragma: no cover
             despeckle_size=despeckle_size,
         )
 
-        return _wrap_mlx_output(mlx_output, despill_strength, auto_despeckle, despeckle_size)
+        result = _wrap_mlx_output(mlx_output, despill_strength, auto_despeckle, despeckle_size)
+
+        if source_passthrough:
+            from corridorkey_core.compositing import apply_source_passthrough, linear_to_srgb
+
+            image_f32 = image.astype(np.float32) if image.dtype == np.uint8 else image
+            source_srgb = np.asarray(linear_to_srgb(image_f32), dtype=np.float32) if input_is_linear else image_f32
+            result["fg"], result["processed"] = apply_source_passthrough(
+                source_srgb, result["fg"], result["alpha"], edge_erode_px, edge_blur_px
+            )
+
+        return result
 
 
 _PRECISION_MAP: dict[str, torch.dtype] = {
@@ -334,7 +348,7 @@ def create_engine(
 
     # Torch
     ckpt = discover_checkpoint(Path(checkpoint_dir), TORCH_EXT)
-    from corridorkey_core.inference_engine import CorridorKeyEngine  # pragma: no cover
+    from corridorkey_core.pipeline.engine import CorridorKeyEngine  # pragma: no cover
 
     resolved_device = device or "cpu"
     model_dtype = _resolve_precision(precision, resolved_device)

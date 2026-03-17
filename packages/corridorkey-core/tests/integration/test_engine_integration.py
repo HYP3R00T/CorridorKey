@@ -30,7 +30,7 @@ def _checkpoint_path() -> Path | None:
 @pytest.fixture(scope="module")
 def engine():
     """Load CorridorKeyEngine once for the entire module."""
-    from corridorkey_core.inference_engine import CorridorKeyEngine
+    from corridorkey_core.pipeline.engine import CorridorKeyEngine
 
     ckpt = _checkpoint_path()
     if ckpt is None:

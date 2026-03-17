@@ -1,8 +1,8 @@
-"""Runtime inference engine for the CorridorKey chroma keying model.
+"""CorridorKeyEngine — loads the GreenFormer model and runs per-frame inference.
 
-Wraps GreenFormer with checkpoint loading, optional torch.compile, and a
-full per-frame processing pipeline including preprocessing, inference,
-despilling, matte cleanup, and compositing.
+This is the hot path. Stages 3, 4, and 5 run fused here in a single optimised
+call. The standalone stage functions in pipeline.stages exist for tooling that
+needs to call individual stages independently.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import torch
 from torch.nn import functional
 
 from corridorkey_core.compositing import (
+    apply_source_passthrough,
     clean_matte,
     composite_premul,
     composite_straight,
@@ -33,7 +34,6 @@ from corridorkey_core.model_transformer import GreenFormer
 logger = logging.getLogger(__name__)
 
 # VRAM threshold for optimization profile auto-selection.
-# Below this: tiled refiner. At or above: full-frame.
 _VRAM_TILE_THRESHOLD_GB = 12.0
 
 # Refiner tile size and overlap for lowvram mode.
@@ -48,8 +48,6 @@ def _probe_vram_gb() -> float:
     """Return total GPU VRAM in GB using pynvml (driver-level, no CUDA context).
 
     Falls back to torch.cuda if pynvml is unavailable. Returns 0.0 if both fail.
-    Using pynvml avoids stalling when called immediately after another model
-    (e.g. GVM) has released the CUDA context.
     """
     try:
         import pynvml  # type: ignore[import-not-found]
@@ -66,42 +64,6 @@ def _probe_vram_gb() -> float:
     except Exception:
         pass
     return 0.0
-
-
-def _apply_source_passthrough(
-    source_srgb: np.ndarray,
-    fg_pred: np.ndarray,
-    alpha_pred: np.ndarray,
-    edge_erode_px: int,
-    edge_blur_px: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Blend original source pixels into opaque interior regions of the fg prediction.
-
-    Interior pixels (where alpha ≈ 1.0) are taken from the source frame untouched.
-    The model's fg prediction is only used in the edge transition band where it
-    handles green-screen separation, hair strands, and semi-transparency.
-
-    Args:
-        source_srgb: Original source frame [H, W, 3] sRGB float32.
-        fg_pred: Model fg prediction [H, W, 3] sRGB float32.
-        alpha_pred: Predicted alpha [H, W, 1] float32 in [0, 1].
-        edge_erode_px: Pixels to erode the interior mask inward.
-        edge_blur_px: Gaussian blur radius for the transition seam.
-
-    Returns:
-        Tuple of (blended_fg [H, W, 3], rebuilt_processed_rgba [H, W, 4]).
-    """
-    alpha_2d = alpha_pred[:, :, 0]
-    kernel_size = max(1, edge_erode_px * 2 + 1)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    interior = cv2.erode(alpha_2d, kernel, iterations=1)
-    blur_k = max(1, edge_blur_px * 2 + 1)
-    blend_mask = cv2.GaussianBlur(interior, (blur_k, blur_k), 0)[:, :, np.newaxis]
-    blended_fg = np.asarray(blend_mask * source_srgb + (1.0 - blend_mask) * fg_pred, dtype=np.float32)
-    fg_lin = np.asarray(srgb_to_linear(blended_fg), dtype=np.float32)
-    fg_premul = np.asarray(premultiply(fg_lin, alpha_pred), dtype=np.float32)
-    processed_rgba = np.concatenate([fg_premul, alpha_pred], axis=-1)
-    return blended_fg, processed_rgba
 
 
 class CorridorKeyEngine:  # pragma: no cover
@@ -162,8 +124,7 @@ class CorridorKeyEngine:  # pragma: no cover
             optimization_mode = env_mode
             logger.info("Optimization mode override from env: %s", env_mode)
 
-        # MPS (Apple Silicon via PyTorch) always forces lowvram —
-        # Triton/inductor does not support Metal.
+        # MPS always forces lowvram — Triton/inductor does not support Metal.
         is_mps = self.device.type == "mps"
         if is_mps:
             optimization_mode = "lowvram"
@@ -200,8 +161,6 @@ class CorridorKeyEngine:  # pragma: no cover
 
         model = self._load_model().to(model_precision)
 
-        # torch.compile gives a large speedup on CUDA. Skip on unsupported platforms
-        # and when explicitly disabled (MPS lowvram path).
         if self._use_compile and sys.platform in ("linux", "win32"):
             try:
                 cache_dir = Path.home() / ".cache" / "corridorkey" / "torch_compile"
@@ -216,17 +175,16 @@ class CorridorKeyEngine:  # pragma: no cover
                 logger.info("Warm-up complete.")
             except Exception as e:
                 logger.warning("torch.compile failed (%s) — falling back to eager mode.", e)
-                torch.cuda.empty_cache()
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+                elif self.device.type == "mps":
+                    torch.mps.empty_cache()
                 self.model = model
         else:
             self.model = model
 
     def _load_model(self) -> GreenFormer:
-        """Load and return a GreenFormer model from the configured checkpoint path.
-
-        Handles the _orig_mod. prefix left by torch.compile and resizes positional
-        embeddings when the checkpoint resolution differs from img_size.
-        """
+        """Load and return a GreenFormer model from the configured checkpoint path."""
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
         model = GreenFormer(
             encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
@@ -240,8 +198,6 @@ class CorridorKeyEngine:  # pragma: no cover
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=True)
         state_dict = checkpoint.get("state_dict", checkpoint)
 
-        # Strip the _orig_mod. prefix that torch.compile adds to state dict keys.
-        # Also resize positional embeddings when the checkpoint was trained at a different resolution.
         new_state_dict = {}
         model_state = model.state_dict()
 
@@ -251,7 +207,6 @@ class CorridorKeyEngine:  # pragma: no cover
 
             if "pos_embed" in k and k in model_state and v.shape != model_state[k].shape:
                 logger.debug("Resizing %s from %s to %s", k, v.shape, model_state[k].shape)
-                # Treat the sequence dimension as a square spatial grid and bicubic-interpolate.
                 seq_len_src = v.shape[1]
                 seq_len_dst = model_state[k].shape[1]
                 embed_dim = v.shape[2]
@@ -268,9 +223,9 @@ class CorridorKeyEngine:  # pragma: no cover
             new_state_dict[k] = v
 
         missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-        if len(missing) > 0:
+        if missing:
             logger.warning("Missing keys in checkpoint: %s", missing)
-        if len(unexpected) > 0:
+        if unexpected:
             logger.warning("Unexpected keys in checkpoint: %s", unexpected)
 
         return model
@@ -286,8 +241,7 @@ class CorridorKeyEngine:  # pragma: no cover
 
         Splits the full-resolution tensor into overlapping tiles, runs the
         refiner on each, and blends results back using cosine weights in the
-        overlap regions. Identical output to full-frame inference — the tiling
-        is invisible to the caller.
+        overlap regions. Identical output to full-frame inference.
 
         Args:
             rgb_input: RGB tensor [B, 3, H, W].
@@ -306,11 +260,15 @@ class CorridorKeyEngine:  # pragma: no cover
 
         stride = tile_size - overlap
 
-        # Build 1D cosine blend weights for one tile.
-        ramp = torch.linspace(0.0, 1.0, overlap, device=rgb_input.device)
-        flat = torch.ones(tile_size - 2 * overlap, device=rgb_input.device)
-        blend_1d = torch.cat([ramp, flat, ramp.flip(0)])  # length = tile_size
-        blend_2d = (blend_1d.unsqueeze(0) * blend_1d.unsqueeze(1)).unsqueeze(0).unsqueeze(0)  # [1,1,T,T]
+        # overlap must be < tile_size // 2 so the flat centre region has positive length.
+        # Clamp silently rather than crash — the blend will still be correct, just without
+        # a flat centre region when overlap is very large relative to tile_size.
+        safe_overlap = min(overlap, tile_size // 2 - 1)
+        flat_len = tile_size - 2 * safe_overlap
+        ramp = torch.linspace(0.0, 1.0, safe_overlap, device=rgb_input.device)
+        flat = torch.ones(flat_len, device=rgb_input.device)
+        blend_1d = torch.cat([ramp, flat, ramp.flip(0)])
+        blend_2d = (blend_1d.unsqueeze(0) * blend_1d.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
 
         y = 0
         while y < h:
@@ -324,7 +282,6 @@ class CorridorKeyEngine:  # pragma: no cover
                 rgb_tile = rgb_input[:, :, y_start:y_end, x_start:x_end]
                 coarse_tile = coarse_pred[:, :, y_start:y_end, x_start:x_end]
 
-                # Pad to tile_size if the tile is smaller (edge tiles).
                 th, tw = rgb_tile.shape[2], rgb_tile.shape[3]
                 pad_h, pad_w = tile_size - th, tile_size - tw
                 if pad_h > 0 or pad_w > 0:
@@ -333,7 +290,6 @@ class CorridorKeyEngine:  # pragma: no cover
 
                 delta_tile = refiner(rgb_tile, coarse_tile)
 
-                # Crop back to actual tile size before accumulating.
                 delta_tile = delta_tile[:, :, :th, :tw]
                 w_tile = blend_2d[:, :, :th, :tw]
 
@@ -347,7 +303,6 @@ class CorridorKeyEngine:  # pragma: no cover
             if y_end == h:
                 break
 
-        # Normalise by accumulated blend weights.
         return output / weight.clamp(min=1e-6)
 
     @torch.inference_mode()
@@ -371,37 +326,21 @@ class CorridorKeyEngine:  # pragma: no cover
             image: RGB float array [H, W, 3] in range 0.0-1.0 or uint8 0-255.
                 Assumed sRGB unless input_is_linear is True.
             mask_linear: Grayscale float array [H, W] or [H, W, 1] in range 0.0-1.0.
-                Always assumed to be linear.
             refiner_scale: Multiplier applied to the CNN refiner output deltas.
-                Values above 1.0 strengthen refinement, below 1.0 weaken it.
-            input_is_linear: If True, the image is treated as linear light and
-                converted to sRGB before being passed to the model.
-            fg_is_straight: If True, the foreground output is treated as straight
-                (unpremultiplied) during compositing.
+            input_is_linear: If True, the image is treated as linear light.
+            fg_is_straight: If True, the foreground output is straight (unpremultiplied).
             despill_strength: Blend factor for the despill effect (0.0 to 1.0).
-            auto_despeckle: If True, removes small disconnected foreground islands
-                from the predicted alpha matte.
-            despeckle_size: Minimum pixel area for a foreground island to be kept
-                when auto_despeckle is enabled.
-            source_passthrough: If True, passes original source pixels through in
-                opaque interior regions. Only the edge transition band uses the
-                model's fg prediction. Preserves full source quality in solid areas.
+            auto_despeckle: Remove small disconnected foreground islands.
+            despeckle_size: Minimum pixel area for a foreground island to be kept.
+            source_passthrough: Pass original source pixels through in opaque interior regions.
             edge_erode_px: Pixels to erode the interior mask inward before blending.
-                Safety buffer to avoid using original pixels where green spill
-                might contaminate.
-            edge_blur_px: Gaussian blur radius for the transition blend between
-                source and model fg. Controls smoothness of the seam.
+            edge_blur_px: Gaussian blur radius for the transition blend seam.
 
         Returns:
-            A dict with four keys:
-                "alpha": Raw predicted alpha [H, W, 1], linear float.
-                "fg": Raw predicted foreground [H, W, 3], sRGB straight float.
-                "comp": Preview composite over checkerboard [H, W, 3], sRGB float.
-                "processed": Final RGBA [H, W, 4], linear premultiplied float.
+            Dict with keys "alpha", "fg", "comp", "processed" — all at source resolution.
         """
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
-
         if mask_linear.dtype == np.uint8:
             mask_linear = mask_linear.astype(np.float32) / 255.0
 
@@ -410,9 +349,6 @@ class CorridorKeyEngine:  # pragma: no cover
         if mask_linear.ndim == 2:
             mask_linear = mask_linear[:, :, np.newaxis]
 
-        # Resize to the model's internal resolution.
-        # When the input is linear, resize before converting to sRGB to preserve
-        # energy in highlights during downsampling.
         if input_is_linear:
             image_resized_linear = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
             image_resized_srgb = np.asarray(linear_to_srgb(image_resized_linear), dtype=np.float32)
@@ -420,36 +356,25 @@ class CorridorKeyEngine:  # pragma: no cover
             image_resized_srgb = cv2.resize(image, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
         mask_resized = cv2.resize(mask_linear, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
-
         if mask_resized.ndim == 2:
             mask_resized = mask_resized[:, :, np.newaxis]
 
-        # Normalize with ImageNet mean and std, which the Hiera encoder was pretrained with.
         image_normalized = (image_resized_srgb - self.mean) / self.std
-
-        # Stack image and mask into a single [B, 4, H, W] tensor.
         model_input_np = np.concatenate([image_normalized, mask_resized], axis=-1)
         model_input = (
             torch.from_numpy(model_input_np.transpose((2, 0, 1))).unsqueeze(0).to(self.model_precision).to(self.device)
         )
 
-        # Optionally scale the refiner's delta output via a forward hook.
-        # In lowvram mode, replace the refiner's forward entirely with the tiled version.
         hook_handle = None
         if self._tile_refiner and self.model.refiner is not None:  # ty:ignore[unresolved-attribute]
-            # Capture rgb_input in closure for the tiled call.
             _rgb = model_input[:, :3]
             _coarse_ref: list[torch.Tensor] = []
 
             def _tiled_refiner_hook(module, inputs, output):
-                # inputs[0] is the concatenated [img, coarse_pred] tensor.
-                # We ignore it and re-run tiled using the captured rgb + coarse.
                 coarse = _coarse_ref[0] if _coarse_ref else inputs[0][:, 3:]
                 return self._run_refiner_tiled(_rgb, coarse)
 
-            # Capture coarse_pred before the refiner runs via a pre-hook.
             def _capture_coarse_hook(module, inputs):
-                # inputs[0] is [img, coarse_pred] concatenated — coarse is channels 3:7.
                 _coarse_ref.clear()
                 _coarse_ref.append(inputs[0][:, 3:])
 
@@ -473,23 +398,17 @@ class CorridorKeyEngine:  # pragma: no cover
         if pre_handle:
             pre_handle.remove()
 
-        # Transfer at model resolution (2048x2048) - small tensors, fast DMA.
-        # All post-processing runs at this resolution (~4x fewer pixels than 4K).
-        # Only the final outputs are upsampled to original resolution.
-        alpha_s = model_output["alpha"][0].permute(1, 2, 0).float().cpu().numpy()  # [S, S, 1]
-        fg_s = model_output["fg"][0].permute(1, 2, 0).float().cpu().numpy()  # [S, S, 3]
+        alpha_s = model_output["alpha"][0].permute(1, 2, 0).float().cpu().numpy()
+        fg_s = model_output["fg"][0].permute(1, 2, 0).float().cpu().numpy()
 
-        # Despeckle at model resolution (cv2 connected-components, no GPU equivalent).
         if auto_despeckle:
             alpha_s = clean_matte(alpha_s, area_threshold=despeckle_size, dilation=25, blur_size=5)
 
-        # Despill and linearise at model resolution - color-only ops, resolution-independent.
         fg_despilled_s = np.asarray(
             despill(fg_s, green_limit_mode="average", strength=despill_strength), dtype=np.float32
         )
         fg_linear_s = np.asarray(srgb_to_linear(fg_despilled_s), dtype=np.float32)
 
-        # Checkerboard composite for preview - cached after first frame.
         cb_key = (self.img_size, self.img_size)
         if cb_key not in self._checkerboard_cache:
             cb_srgb = create_checkerboard(self.img_size, self.img_size, checker_size=64, color1=0.15, color2=0.55)
@@ -505,24 +424,20 @@ class CorridorKeyEngine:  # pragma: no cover
         fg_premul_s = np.asarray(premultiply(fg_linear_s, alpha_s), dtype=np.float32)
         rgba_s = np.concatenate([fg_premul_s, alpha_s], axis=-1)
 
-        # Upsample all outputs to original resolution.
         alpha_pred = cv2.resize(alpha_s, (w, h), interpolation=cv2.INTER_LINEAR)[:, :, np.newaxis]
         fg_pred = cv2.resize(fg_s, (w, h), interpolation=cv2.INTER_LINEAR)
         composite_srgb = cv2.resize(comp_srgb_s, (w, h), interpolation=cv2.INTER_LINEAR)
         output_rgba = cv2.resize(rgba_s, (w, h), interpolation=cv2.INTER_LINEAR)
 
-        # Source passthrough: blend original source pixels into opaque interior regions.
-        # The model's fg prediction is only used in the edge transition band.
-        # This preserves full source quality (no model artifacts) in solid areas.
         if source_passthrough:
             source_srgb = np.asarray(linear_to_srgb(image), dtype=np.float32) if input_is_linear else image
-            fg_pred, output_rgba = _apply_source_passthrough(
+            fg_pred, output_rgba = apply_source_passthrough(
                 source_srgb, fg_pred, alpha_pred, edge_erode_px, edge_blur_px
             )
 
         return {
-            "alpha": alpha_pred,  # linear float, raw prediction
-            "fg": fg_pred,  # sRGB float, straight (unpremultiplied)
-            "comp": composite_srgb,  # sRGB float, preview composite over checkerboard
-            "processed": output_rgba,  # linear float, premultiplied RGBA
+            "alpha": alpha_pred,
+            "fg": fg_pred,
+            "comp": composite_srgb,
+            "processed": output_rgba,
         }
