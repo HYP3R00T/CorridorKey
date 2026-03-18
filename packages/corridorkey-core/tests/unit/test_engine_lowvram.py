@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -59,7 +60,7 @@ class TestLowVramRefinerHook:
         """The lowvram hook must pass [B,4,H,W] coarse_pred to _run_refiner_tiled."""
         engine = _make_engine(32)
         spy = MagicMock(return_value=torch.zeros((1, 4, 32, 32), dtype=torch.float32))
-        engine._run_refiner_tiled = spy
+        cast(Any, engine)._run_refiner_tiled = spy
 
         image = np.random.rand(32, 32, 3).astype(np.float32)
         mask = np.random.rand(32, 32).astype(np.float32)

@@ -17,7 +17,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, cast
 
 import numpy as np
 
@@ -41,6 +41,9 @@ from corridorkey.writer import exr_flags, write_outputs
 logger = logging.getLogger(__name__)
 
 _UNSET = object()
+_DeviceLiteral = Literal["auto", "cuda", "mps", "cpu"]
+_OptModeLiteral = Literal["auto", "speed", "lowvram"]
+_PrecisionLiteral = Literal["auto", "fp16", "bf16", "fp32"]
 
 
 def inference_params_to_postprocess(params: InferenceParams):
@@ -95,7 +98,7 @@ class CorridorKeyService:
     """
 
     def __init__(self, config: CorridorKeyConfig | None = None) -> None:
-        self._config = config or load_config()
+        self._config: CorridorKeyConfig = config if config is not None else load_config()
         self._engine = None
         self._engine_loaded = False
         self._device: str = device_utils.resolve_device(self._config.device)
@@ -153,10 +156,20 @@ class CorridorKeyService:
         current_opt = self._config.optimization_mode
         current_precision = self._config.precision
         current_img_size = self._config.img_size
-        target_opt = optimization_mode or current_opt
-        target_precision = precision or current_precision
+
+        if optimization_mode in {"auto", "speed", "lowvram"}:
+            target_opt: _OptModeLiteral = cast(_OptModeLiteral, optimization_mode)
+        else:
+            target_opt = current_opt
+
+        if precision in {"auto", "fp16", "bf16", "fp32"}:
+            target_precision: _PrecisionLiteral = cast(_PrecisionLiteral, precision)
+        else:
+            target_precision = current_precision
+
         target_img_size = current_img_size if img_size is _UNSET else img_size
-        target_device = self._device if device is None else device_utils.resolve_device(device)
+        resolved_device = self._device if device is None else device_utils.resolve_device(device)
+        target_device = cast(_DeviceLiteral, resolved_device)
 
         changed = (
             target_device != self._device

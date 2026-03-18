@@ -13,6 +13,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
@@ -305,7 +306,9 @@ class CorridorKeyEngine:  # pragma: no cover
             Delta logits tensor [B, 4, H, W].
         """
         b, _, h, w = rgb_input.shape
-        refiner = self.model.refiner
+        refiner = getattr(self.model, "refiner", None)
+        if refiner is None or not isinstance(refiner, torch.nn.Module):
+            raise RuntimeError("Refiner is required for tiled lowvram execution")
 
         # GroupNorm does not support bf16 on CUDA - upcast to float32 for the
         # tiled refiner pass and cast the result back to the original dtype.
@@ -349,7 +352,7 @@ class CorridorKeyEngine:  # pragma: no cover
                 # when tiled execution calls the refiner internally.
                 self._bypass_tiled_refiner_hook = True
                 try:
-                    delta_tile = refiner(rgb_tile, coarse_tile)
+                    delta_tile = cast(torch.Tensor, refiner(rgb_tile, coarse_tile))
                 finally:
                     self._bypass_tiled_refiner_hook = False
 
@@ -431,26 +434,26 @@ class CorridorKeyEngine:  # pragma: no cover
         )
         preprocess_ms = (time.monotonic() - t_pre_start) * 1000.0
 
+        refiner = getattr(self.model, "refiner", None)
         hook_handle = None
-        if self._tile_refiner and self.model.refiner is not None:
+        if self._tile_refiner and refiner is not None:
+
             def _tiled_refiner_hook(module, inputs, output):
                 if self._bypass_tiled_refiner_hook:
                     return output
                 if len(inputs) != 2:
-                    raise RuntimeError(
-                        f"Refiner hook expected 2 inputs (rgb, coarse_pred), got {len(inputs)}"
-                    )
+                    raise RuntimeError(f"Refiner hook expected 2 inputs (rgb, coarse_pred), got {len(inputs)}")
                 rgb, coarse = inputs
                 return self._run_refiner_tiled(rgb, coarse)
 
-            hook_handle = self.model.refiner.register_forward_hook(_tiled_refiner_hook)
+            hook_handle = refiner.register_forward_hook(_tiled_refiner_hook)
             pre_handle = None
-        elif refiner_scale != 1.0 and self.model.refiner is not None:
+        elif refiner_scale != 1.0 and refiner is not None:
 
             def scale_hook(module, input, output):
                 return output * refiner_scale
 
-            hook_handle = self.model.refiner.register_forward_hook(scale_hook)
+            hook_handle = refiner.register_forward_hook(scale_hook)
             pre_handle = None
         else:
             pre_handle = None

@@ -8,6 +8,7 @@ an optional dilated CNN refiner stage.
 from __future__ import annotations
 
 import logging
+from typing import Protocol, cast
 
 import timm
 import torch
@@ -15,6 +16,10 @@ import torch.nn as nn
 from torch.nn import functional
 
 logger = logging.getLogger(__name__)
+
+
+class _PatchEmbedContainer(Protocol):
+    proj: nn.Conv2d
 
 
 class MLP(nn.Module):
@@ -278,14 +283,19 @@ class GreenFormer(nn.Module):
         """
         # Hiera stores the patch embedding at encoder.model.patch_embed.proj.
         # Fall back to encoder.patch_embed.proj if timm changes the structure.
-        try:
-            patch_embed = self.encoder.model.patch_embed.proj  # ty:ignore[unresolved-attribute]
-        except AttributeError:
-            patch_embed = self.encoder.patch_embed.proj  # ty:ignore[unresolved-attribute]
-        weight = patch_embed.weight.data  # [Out, 3, K, K]  # ty:ignore[unresolved-attribute]
-        bias = patch_embed.bias.data if patch_embed.bias is not None else None  # ty:ignore[unresolved-attribute]
+        model_obj = getattr(self.encoder, "model", None)
+        patch_embed_obj = getattr(model_obj, "patch_embed", None) if model_obj is not None else None
+        if patch_embed_obj is None:
+            patch_embed_obj = getattr(self.encoder, "patch_embed", None)
+        if patch_embed_obj is None:
+            raise AttributeError("Could not locate patch_embed module on encoder")
 
-        out_channels, _, k, _ = weight.shape  # ty:ignore[not-iterable]
+        patch_embed_container = cast(_PatchEmbedContainer, patch_embed_obj)
+        patch_embed = patch_embed_container.proj
+        weight = patch_embed.weight.detach().clone()  # [Out, 3, K, K]
+        bias = patch_embed.bias.detach().clone() if patch_embed.bias is not None else None
+
+        out_channels, _, k, _ = weight.shape
 
         # Create new conv
         patched_conv = nn.Conv2d(
@@ -293,21 +303,18 @@ class GreenFormer(nn.Module):
             out_channels,
             kernel_size=k,
             stride=patch_embed.stride,  # ty:ignore[invalid-argument-type]
-            padding=patch_embed.padding,  # ty:ignore[invalid-argument-type, unresolved-attribute]
+            padding=patch_embed.padding,  # ty:ignore[invalid-argument-type]
             bias=(bias is not None),
         )
 
-        patched_conv.weight.data[:, :3, :, :] = weight  # ty:ignore[invalid-assignment]
-        patched_conv.weight.data[:, 3:, :, :] = 0.0  # extra channels start at zero to avoid disrupting RGB features
-
-        if bias is not None:
-            patched_conv.bias.data = bias
+        with torch.no_grad():
+            patched_conv.weight[:, :3, :, :].copy_(weight)
+            patched_conv.weight[:, 3:, :, :].zero_()  # extra channels start at zero to avoid disrupting RGB features
+            if bias is not None and patched_conv.bias is not None:
+                patched_conv.bias.copy_(bias)
 
         # Replace in module
-        try:
-            self.encoder.model.patch_embed.proj = patched_conv
-        except AttributeError:
-            self.encoder.patch_embed.proj = patched_conv
+        patch_embed_container.proj = patched_conv
 
         logger.info("Patched input layer: 3 -> %d channels (extra initialized to 0)", in_channels)
 
