@@ -60,6 +60,7 @@ def process_directory(
     device: str | None = None,
     optimization_mode: str | None = None,
     precision: str | None = None,
+    img_size: int | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
     on_warning: Callable[[str], None] | None = None,
     on_clip_start: Callable[[str, str], None] | None = None,
@@ -87,6 +88,9 @@ def process_directory(
             "lowvram"). Overrides config.optimization_mode when provided.
         precision: Inference float format override ("auto", "fp16", "bf16", "fp32").
             Overrides config.precision when provided.
+        img_size: Internal model inference resolution override.
+            None keeps adaptive auto sizing. Higher values improve detail quality
+            but increase VRAM usage and processing time.
         on_progress: Called with (clip_name, current_frame, total_frames).
         on_warning: Called with non-fatal warning messages.
         on_clip_start: Called with (clip_name, state) before processing each clip.
@@ -105,6 +109,8 @@ def process_directory(
             overrides["optimization_mode"] = optimization_mode
         if precision is not None:
             overrides["precision"] = precision
+        if img_size is not None:
+            overrides["img_size"] = img_size
         config = load_config(overrides=overrides or None)
 
     service = CorridorKeyService(config)

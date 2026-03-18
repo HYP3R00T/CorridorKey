@@ -24,6 +24,10 @@ def init() -> None:
     """
     console.print("[bold cyan]CorridorKey - Init[/bold cyan]\n")
 
+    from corridorkey_cli._helpers import setup_logging
+
+    setup_logging(verbose=False)
+
     # 1. Run doctor inline (import here to avoid circular at module level)
     from corridorkey_cli.commands.doctor import doctor
 

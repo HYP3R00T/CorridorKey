@@ -23,6 +23,10 @@ _WARN = "[yellow]WARN[/yellow]"
 @app.callback(invoke_without_command=True)
 def doctor() -> None:
     """Run a read-only environment health check and print a results table."""
+    from corridorkey_cli._helpers import setup_logging
+
+    setup_logging(verbose=False)
+
     rows: list[tuple[str, str, str]] = []
     all_ok = True
 

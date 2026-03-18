@@ -31,6 +31,7 @@ class TestCorridorKeyConfig:
         """All fields must have the documented default values so new installs work without a config file."""
         config = CorridorKeyConfig()
         assert config.device == "auto"
+        assert config.img_size is None
         assert config.despill_strength == 1.0
         assert config.auto_despeckle is True
         assert config.despeckle_size == 400
@@ -89,15 +90,20 @@ class TestExportConfig:
         content = dest.read_text()
         assert "true" in content
         assert "false" in content
-        assert "True" not in content
-        assert "False" not in content
+        # Values must be lowercase - check no field assignment uses Python-cased booleans.
+        import re
 
-    def test_string_values_quoted(self, tmp_path: Path):
-        """String values must be quoted in YAML format."""
+        value_lines = [ln for ln in content.splitlines() if re.match(r"^\w+:", ln)]
+        for line in value_lines:
+            assert ": True" not in line, f"Python-cased bool in: {line}"
+            assert ": False" not in line, f"Python-cased bool in: {line}"
+
+    def test_string_values_unquoted(self, tmp_path: Path):
+        """Simple string values are written unquoted (valid YAML, avoids escape issues)."""
         config = _config(tmp_path, device="cpu")
         dest = export_config(config, path=tmp_path / "out.yaml")
         content = dest.read_text()
-        assert 'device: "cpu"' in content
+        assert "device: cpu" in content
 
     def test_creates_parent_dirs(self, tmp_path: Path):
         """export_config must create any missing parent directories."""

@@ -206,7 +206,20 @@ class _MLXEngineAdapter:  # pragma: no cover
 
     def __init__(self, mlx_engine) -> None:
         self._engine = mlx_engine
+        self._tile_size = getattr(mlx_engine, "tile_size", None)
+        self._overlap = getattr(mlx_engine, "overlap", None)
         logger.info("MLX adapter active: despill and despeckle are handled by the adapter, not native MLX")
+
+    def runtime_config(self) -> dict[str, str]:
+        """Return resolved runtime configuration for user-facing reporting."""
+        opt_mode = "tiled" if self._tile_size else "full-frame"
+        return {
+            "backend": "mlx",
+            "device": "apple-silicon",
+            "optimization_mode": opt_mode,
+            "precision": "mlx-default",
+            "img_size": "unknown",
+        }
 
     def process_frame(
         self,
@@ -270,7 +283,8 @@ VALID_PRECISIONS = ("auto", "fp16", "bf16", "fp32")
 def _resolve_precision(precision: str, device: str) -> torch.dtype:
     """Resolve the model weight dtype from a precision string.
 
-    "auto" selects BF16 on Ampere+ CUDA or Apple Silicon MPS, FP16 otherwise.
+    "auto" selects FP32 on CPU, BF16 on Ampere+ CUDA or Apple Silicon MPS,
+    and FP16 for older CUDA GPUs.
 
     Args:
         precision: One of "auto", "fp16", "bf16", "fp32".
@@ -290,6 +304,9 @@ def _resolve_precision(precision: str, device: str) -> torch.dtype:
 
     # Auto-detect: prefer BF16 on hardware that supports it natively.
     dev = torch.device(device)
+    if dev.type == "cpu":
+        logger.info("Precision auto -> fp32 (CPU)")
+        return torch.float32
     if dev.type == "mps":
         logger.info("Precision auto -> bf16 (Apple Silicon MPS)")
         return torch.bfloat16
@@ -301,8 +318,8 @@ def _resolve_precision(precision: str, device: str) -> torch.dtype:
             return torch.bfloat16
         logger.info("Precision auto -> fp16 (pre-Ampere GPU: %s)", props.name)
         return torch.float16
-    logger.info("Precision auto -> fp16 (default)")
-    return torch.float16
+    logger.info("Precision auto -> fp32 (default)")
+    return torch.float32
 
 
 def create_engine(
@@ -353,11 +370,12 @@ def create_engine(
     resolved_device = device or "cpu"
     model_dtype = _resolve_precision(precision, resolved_device)
     logger.info(  # pragma: no cover
-        "Torch engine loaded: %s (device=%s, optimization=%s, precision=%s)",
+        "Torch engine request: %s (device=%s, optimization=%s, precision=%s, img_size=%d)",
         ckpt.name,
         resolved_device,
         optimization_mode,
         model_dtype,
+        img_size,
     )
     return CorridorKeyEngine(
         checkpoint_path=ckpt,

@@ -249,6 +249,18 @@ class TestProcessDirectoryOverrides:
             process_directory("/fake", precision="fp16")
         assert mock_lc.called
 
+    def test_img_size_override(self):
+        """img_size override must be forwarded to load_config."""
+        with (
+            patch("corridorkey.pipeline.CorridorKeyService") as mock_cls,
+            patch("corridorkey.pipeline.load_config") as mock_lc,
+        ):
+            mock_lc.return_value = MagicMock()
+            instance = self._patched_service([])
+            mock_cls.return_value = instance
+            process_directory("/fake", img_size=2560)
+        assert mock_lc.called
+
     def test_on_clip_done_called_per_clip(self):
         """on_clip_done must be called once per clip with its ClipSummary."""
         clip = _make_clip("shot1", ClipState.COMPLETE)

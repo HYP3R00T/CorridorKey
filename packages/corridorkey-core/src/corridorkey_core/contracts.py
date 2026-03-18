@@ -8,55 +8,13 @@ public API is create_engine() in corridorkey_core.__init__.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
 
 @dataclass
-class PreprocessedTensor:
-    """Output of stage_3_preprocess. Input to stage_4_infer.
-
-    Attributes:
-        tensor: Float32 tensor [1, 4, img_size, img_size] on device.
-            Channels 0-2 = ImageNet-normalised image, channel 3 = mask.
-        img_size: Square resolution the tensor was prepared at.
-        device: Torch device string the tensor lives on.
-        source_h: Original frame height - carried through for upsampling in stage 5.
-        source_w: Original frame width - carried through for upsampling in stage 5.
-    """
-
-    tensor: Any  # torch.Tensor - Any avoids a hard torch import at module level
-    img_size: int
-    device: str
-    source_h: int
-    source_w: int
-
-
-@dataclass
-class RawPrediction:
-    """Output of stage_4_infer. Input to stage_5_postprocess.
-
-    All arrays are at model resolution (img_size x img_size), float32.
-
-    Attributes:
-        alpha: Predicted alpha matte [img_size, img_size, 1], linear, 0-1.
-        fg: Predicted foreground RGB [img_size, img_size, 3], sRGB straight, 0-1.
-        img_size: Resolution of the prediction.
-        source_h: Original frame height (needed for upsampling in stage 5).
-        source_w: Original frame width (needed for upsampling in stage 5).
-    """
-
-    alpha: np.ndarray
-    fg: np.ndarray
-    img_size: int
-    source_h: int
-    source_w: int
-
-
-@dataclass
 class PostprocessParams:
-    """Parameters controlling stage_5_postprocess behaviour.
+    """Parameters controlling stage 5 postprocess behaviour.
 
     Attributes:
         despill_strength: Green spill suppression strength (0.0-1.0).
@@ -79,7 +37,7 @@ class PostprocessParams:
 
 @dataclass
 class ProcessedFrame:
-    """Output of stage_5_postprocess. Input to write_outputs.
+    """Output of stage 5 postprocess. Input to write_outputs.
 
     All arrays are at original source resolution, float32.
 

@@ -11,7 +11,9 @@ import logging
 import math
 import os
 import sys
+import time
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
@@ -108,6 +110,7 @@ class CorridorKeyEngine:  # pragma: no cover
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
 
         self._checkerboard_cache: dict[tuple[int, int], np.ndarray] = {}
+        self._bypass_tiled_refiner_hook = False
 
         if mixed_precision or model_precision != torch.float32:
             torch.set_float32_matmul_precision("high")
@@ -117,6 +120,7 @@ class CorridorKeyEngine:  # pragma: no cover
             self.mixed_precision = False
 
         self.model_precision = model_precision
+        self._resolved_optimization_mode = "speed"
 
         # Resolve optimization mode - env var overrides argument.
         env_mode = os.environ.get(OPT_MODE_ENV_VAR, "").lower()
@@ -133,35 +137,69 @@ class CorridorKeyEngine:  # pragma: no cover
         if optimization_mode == "speed":
             self._tile_refiner = False
             self._use_compile = True
+            self._resolved_optimization_mode = "speed"
             logger.info("Optimization: speed (full-frame refiner, torch.compile)")
         elif optimization_mode == "lowvram":
             self._tile_refiner = True
-            self._use_compile = not is_mps
+            # torch.compile is incompatible with forward hooks used by tiled
+            # refiner mode - Dynamo sees the refiner module twice (once as a
+            # compiled submodule, once via the hook closure) and raises
+            # "already tracked for mutation". Eager mode is correct here.
+            self._use_compile = False
+            self._resolved_optimization_mode = "lowvram"
             logger.info(
-                "Optimization: lowvram (tiled refiner %dx%d, %dpx overlap%s)",
+                "Optimization: lowvram (tiled refiner %dx%d, %dpx overlap, eager mode)",
                 _REFINER_TILE_SIZE,
                 _REFINER_TILE_SIZE,
                 _REFINER_TILE_OVERLAP,
-                ", no torch.compile" if is_mps else "",
             )
         else:  # auto
             vram_gb = _probe_vram_gb()
             if 0 < vram_gb < _VRAM_TILE_THRESHOLD_GB:
                 self._tile_refiner = True
-                self._use_compile = True
+                self._use_compile = False  # hooks + compile incompatible, see lowvram note above
+                self._resolved_optimization_mode = "lowvram"
                 logger.info(
-                    "Optimization: auto -> lowvram (%.1f GB < %.0f GB threshold)", vram_gb, _VRAM_TILE_THRESHOLD_GB
+                    "Optimization: auto -> lowvram (%.1f GB < %.0f GB threshold, eager mode)",
+                    vram_gb,
+                    _VRAM_TILE_THRESHOLD_GB,
                 )
             else:
                 self._tile_refiner = False
                 self._use_compile = True
+                self._resolved_optimization_mode = "speed"
                 logger.info(
                     "Optimization: auto -> speed (%.1f GB >= %.0f GB threshold)", vram_gb, _VRAM_TILE_THRESHOLD_GB
                 )
 
         model = self._load_model().to(model_precision)
 
-        if self._use_compile and sys.platform in ("linux", "win32"):
+        # GroupNorm does not support bf16 on CUDA. Keep the refiner in float32
+        # regardless of the overall model precision.
+        if model_precision != torch.float32 and model.refiner is not None:
+            model.refiner.float()
+            logger.info("Refiner kept in float32 (GroupNorm bf16 unsupported on CUDA)")
+
+        # BatchNorm2d (used in DecoderHead) does not support bf16 on CUDA either.
+        # Cast all BN layers back to float32 when the backbone runs in bf16/fp16.
+        if model_precision != torch.float32:
+            for module in model.modules():
+                if isinstance(module, torch.nn.BatchNorm2d):
+                    module.float()
+            logger.info("BatchNorm2d layers kept in float32 (bf16/fp16 unsupported)")
+
+        # torch.compile is enabled for CUDA only. CPU compile warmup can be
+        # disproportionately expensive for this model and harms first-frame latency.
+        # Also disable compile for mixed-dtype models (reduced precision backbone
+        # + float32 BN/refiner) because Dynamo tracing can hit dtype mismatches.
+        can_compile = self._use_compile and model_precision == torch.float32 and self.device.type == "cuda"
+        if self._use_compile and not can_compile:
+            if self.device.type != "cuda":
+                logger.info("torch.compile disabled (device=%s; CUDA-only)", self.device.type)
+            else:
+                logger.info("torch.compile disabled (mixed-dtype model incompatible with Dynamo tracing)")
+
+        if can_compile and sys.platform in ("linux", "win32"):
             try:
                 cache_dir = Path.home() / ".cache" / "corridorkey" / "torch_compile"
                 cache_dir.mkdir(parents=True, exist_ok=True)
@@ -182,6 +220,21 @@ class CorridorKeyEngine:  # pragma: no cover
                 self.model = model
         else:
             self.model = model
+
+    def runtime_config(self) -> dict[str, str]:
+        """Return resolved runtime configuration for user-facing reporting."""
+        precision_map = {
+            torch.float16: "fp16",
+            torch.bfloat16: "bf16",
+            torch.float32: "fp32",
+        }
+        return {
+            "backend": "torch",
+            "device": self.device.type,
+            "optimization_mode": self._resolved_optimization_mode,
+            "precision": precision_map.get(self.model_precision, str(self.model_precision)),
+            "img_size": str(self.img_size),
+        }
 
     def _load_model(self) -> GreenFormer:
         """Load and return a GreenFormer model from the configured checkpoint path."""
@@ -253,9 +306,19 @@ class CorridorKeyEngine:  # pragma: no cover
             Delta logits tensor [B, 4, H, W].
         """
         b, _, h, w = rgb_input.shape
-        refiner = self.model.refiner  # ty:ignore[unresolved-attribute]
+        refiner = getattr(self.model, "refiner", None)
+        if refiner is None or not isinstance(refiner, torch.nn.Module):
+            raise RuntimeError("Refiner is required for tiled lowvram execution")
 
-        output = torch.zeros(b, 4, h, w, device=rgb_input.device, dtype=rgb_input.dtype)
+        # GroupNorm does not support bf16 on CUDA - upcast to float32 for the
+        # tiled refiner pass and cast the result back to the original dtype.
+        orig_dtype = rgb_input.dtype
+        if orig_dtype != torch.float32:
+            rgb_input = rgb_input.float()
+            coarse_pred = coarse_pred.float()
+            refiner = refiner.float()
+
+        output = torch.zeros(b, 4, h, w, device=rgb_input.device, dtype=torch.float32)
         weight = torch.zeros(b, 1, h, w, device=rgb_input.device, dtype=rgb_input.dtype)
 
         stride = tile_size - overlap
@@ -285,7 +348,13 @@ class CorridorKeyEngine:  # pragma: no cover
                     rgb_tile = functional.pad(rgb_tile, (0, pad_w, 0, pad_h))
                     coarse_tile = functional.pad(coarse_tile, (0, pad_w, 0, pad_h))
 
-                delta_tile = refiner(rgb_tile, coarse_tile)
+                # Avoid recursive re-entry through the lowvram forward hook
+                # when tiled execution calls the refiner internally.
+                self._bypass_tiled_refiner_hook = True
+                try:
+                    delta_tile = cast(torch.Tensor, refiner(rgb_tile, coarse_tile))
+                finally:
+                    self._bypass_tiled_refiner_hook = False
 
                 delta_tile = delta_tile[:, :, :th, :tw]
                 w_tile = blend_2d[:, :, :th, :tw]
@@ -300,7 +369,8 @@ class CorridorKeyEngine:  # pragma: no cover
             if y_end == h:
                 break
 
-        return output / weight.clamp(min=1e-6)
+        result = output / weight.clamp(min=1e-6)
+        return result.to(orig_dtype)
 
     @torch.inference_mode()
     def process_frame(
@@ -336,6 +406,7 @@ class CorridorKeyEngine:  # pragma: no cover
         Returns:
             Dict with keys "alpha", "fg", "comp", "processed" - all at source resolution.
         """
+        t_pre_start = time.monotonic()
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
         if mask_linear.dtype == np.uint8:
@@ -361,40 +432,43 @@ class CorridorKeyEngine:  # pragma: no cover
         model_input = (
             torch.from_numpy(model_input_np.transpose((2, 0, 1))).unsqueeze(0).to(self.model_precision).to(self.device)
         )
+        preprocess_ms = (time.monotonic() - t_pre_start) * 1000.0
 
+        refiner = getattr(self.model, "refiner", None)
         hook_handle = None
-        if self._tile_refiner and self.model.refiner is not None:  # ty:ignore[unresolved-attribute]
-            _rgb = model_input[:, :3]
-            _coarse_ref: list[torch.Tensor] = []
+        if self._tile_refiner and refiner is not None:
 
             def _tiled_refiner_hook(module, inputs, output):
-                coarse = _coarse_ref[0] if _coarse_ref else inputs[0][:, 3:]
-                return self._run_refiner_tiled(_rgb, coarse)
+                if self._bypass_tiled_refiner_hook:
+                    return output
+                if len(inputs) != 2:
+                    raise RuntimeError(f"Refiner hook expected 2 inputs (rgb, coarse_pred), got {len(inputs)}")
+                rgb, coarse = inputs
+                return self._run_refiner_tiled(rgb, coarse)
 
-            def _capture_coarse_hook(module, inputs):
-                _coarse_ref.clear()
-                _coarse_ref.append(inputs[0][:, 3:])
-
-            pre_handle = self.model.refiner.register_forward_pre_hook(_capture_coarse_hook)  # ty:ignore[unresolved-attribute]
-            hook_handle = self.model.refiner.register_forward_hook(_tiled_refiner_hook)  # ty:ignore[unresolved-attribute]
-        elif refiner_scale != 1.0 and self.model.refiner is not None:  # ty:ignore[unresolved-attribute]
+            hook_handle = refiner.register_forward_hook(_tiled_refiner_hook)
+            pre_handle = None
+        elif refiner_scale != 1.0 and refiner is not None:
 
             def scale_hook(module, input, output):
                 return output * refiner_scale
 
-            hook_handle = self.model.refiner.register_forward_hook(scale_hook)  # ty:ignore[unresolved-attribute]
+            hook_handle = refiner.register_forward_hook(scale_hook)
             pre_handle = None
         else:
             pre_handle = None
 
+        t_model_start = time.monotonic()
         with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
             model_output = self.model(model_input)
+        model_ms = (time.monotonic() - t_model_start) * 1000.0
 
         if hook_handle:
             hook_handle.remove()
         if pre_handle:
             pre_handle.remove()
 
+        t_post_start = time.monotonic()
         alpha_s = model_output["alpha"][0].permute(1, 2, 0).float().cpu().numpy()
         fg_s = model_output["fg"][0].permute(1, 2, 0).float().cpu().numpy()
 
@@ -431,6 +505,15 @@ class CorridorKeyEngine:  # pragma: no cover
             fg_pred, output_rgba = apply_source_passthrough(
                 source_srgb, fg_pred, alpha_pred, edge_erode_px, edge_blur_px
             )
+
+        postprocess_ms = (time.monotonic() - t_post_start) * 1000.0
+        logger.debug(
+            "engine_frame_timing preprocess_ms=%.1f model_ms=%.1f postprocess_ms=%.1f total_ms=%.1f",
+            preprocess_ms,
+            model_ms,
+            postprocess_ms,
+            preprocess_ms + model_ms + postprocess_ms,
+        )
 
         return {
             "alpha": alpha_pred,

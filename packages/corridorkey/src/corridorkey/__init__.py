@@ -1,5 +1,10 @@
 """CorridorKey - application layer for the CorridorKey AI chroma keying pipeline."""
 
+import os
+
+# Must be set before cv2 is imported anywhere in the process.
+os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+
 from corridorkey.clip_state import (
     ClipAsset,
     ClipEntry,
@@ -13,6 +18,7 @@ from corridorkey.errors import CorridorKeyError, FFmpegNotFoundError
 from corridorkey.ffmpeg_tools import check_ffmpeg
 from corridorkey.frame_io import FrameData, load_frame
 from corridorkey.job_queue import GPUJob, GPUJobQueue, JobStatus, JobType
+from corridorkey.logging_setup import reset_logging, setup_logging
 from corridorkey.model_manager import MODEL_DOWNLOAD_URL, MODEL_FILENAME, download_model, is_model_present
 from corridorkey.models import InOutRange
 from corridorkey.pipeline import ClipSummary, PipelineResult, process_directory
@@ -44,6 +50,9 @@ from corridorkey.validators import ValidationResult, validate_job_inputs
 from corridorkey.writer import generate_masks, write_outputs
 
 __all__ = [
+    # Logging
+    "setup_logging",
+    "reset_logging",
     # Validation
     "validate_job_inputs",
     "ValidationResult",

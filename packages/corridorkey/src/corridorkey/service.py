@@ -17,7 +17,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, cast
 
 import numpy as np
 
@@ -40,9 +40,14 @@ from corridorkey.writer import exr_flags, write_outputs
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+_DeviceLiteral = Literal["auto", "cuda", "mps", "cpu"]
+_OptModeLiteral = Literal["auto", "speed", "lowvram"]
+_PrecisionLiteral = Literal["auto", "fp16", "bf16", "fp32"]
+
 
 def inference_params_to_postprocess(params: InferenceParams):
-    """Convert InferenceParams to a PostprocessParams for stage_5_postprocess."""
+    """Convert InferenceParams to PostprocessParams for stage 5 postprocessing."""
     from corridorkey_core.contracts import PostprocessParams
 
     return PostprocessParams(
@@ -93,7 +98,7 @@ class CorridorKeyService:
     """
 
     def __init__(self, config: CorridorKeyConfig | None = None) -> None:
-        self._config = config or load_config()
+        self._config: CorridorKeyConfig = config if config is not None else load_config()
         self._engine = None
         self._engine_loaded = False
         self._device: str = device_utils.resolve_device(self._config.device)
@@ -135,6 +140,77 @@ class CorridorKeyService:
         self._device = device_utils.resolve_device(requested or self._config.device)
         logger.info("Compute device: %s", self._device)
         return self._device
+
+    def configure_engine_settings(
+        self,
+        device: str | None = None,
+        optimization_mode: str | None = None,
+        precision: str | None = None,
+        img_size: int | None | object = _UNSET,
+    ) -> tuple[str, str, str, int | None]:
+        """Apply runtime engine settings and unload engine if they changed.
+
+        Returns:
+            Tuple of (resolved_device, optimization_mode, precision, img_size) now active.
+        """
+        current_opt = self._config.optimization_mode
+        current_precision = self._config.precision
+        current_img_size = self._config.img_size
+
+        if optimization_mode in {"auto", "speed", "lowvram"}:
+            target_opt: _OptModeLiteral = cast(_OptModeLiteral, optimization_mode)
+        else:
+            target_opt = current_opt
+
+        if precision in {"auto", "fp16", "bf16", "fp32"}:
+            target_precision: _PrecisionLiteral = cast(_PrecisionLiteral, precision)
+        else:
+            target_precision = current_precision
+
+        target_img_size = current_img_size if img_size is _UNSET else img_size
+        resolved_device = self._device if device is None else device_utils.resolve_device(device)
+        target_device = cast(_DeviceLiteral, resolved_device)
+
+        changed = (
+            target_device != self._device
+            or target_opt != self._config.optimization_mode
+            or target_precision != self._config.precision
+            or target_img_size != self._config.img_size
+        )
+
+        self._device = target_device
+        self._config.device = target_device
+        self._config.optimization_mode = target_opt
+        self._config.precision = target_precision
+        self._config.img_size = target_img_size if isinstance(target_img_size, int) or target_img_size is None else None
+
+        if changed and self.is_engine_loaded():
+            logger.info(
+                "Engine settings changed (device=%s, optimization=%s, precision=%s, img_size=%s) - reloading engine",
+                self._device,
+                self._config.optimization_mode,
+                self._config.precision,
+                self._config.img_size if self._config.img_size is not None else "auto",
+            )
+            self.unload_engine()
+
+        return self._device, self._config.optimization_mode, self._config.precision, self._config.img_size
+
+    def get_engine_runtime_config(self) -> dict[str, str] | None:
+        """Return resolved runtime settings from the loaded engine, if available."""
+        if not self.is_engine_loaded() or self._engine is None:
+            return None
+        runtime_fn = getattr(self._engine, "runtime_config", None)
+        if callable(runtime_fn):
+            cfg = runtime_fn()
+            return {
+                "backend": str(cfg.get("backend", "unknown")),
+                "device": str(cfg.get("device", "unknown")),
+                "optimization_mode": str(cfg.get("optimization_mode", "unknown")),
+                "precision": str(cfg.get("precision", "unknown")),
+                "img_size": str(cfg.get("img_size", "unknown")),
+            }
+        return None
 
     def get_vram_info(self) -> dict[str, float | str]:
         """Return GPU VRAM info in GB. Empty dict if CUDA is unavailable."""
@@ -187,16 +263,55 @@ class CorridorKeyService:
         """Lazy-load the inference engine."""
         if self._engine is not None:
             return self._engine
+
+        requested_precision = self._config.precision
+        requested_img_size = self._config.img_size if self._config.img_size is not None else 2048
+
+        # On low-VRAM CUDA laptops, 2048 + lowvram tiling can be prohibitively
+        # slow. Apply a conservative speed profile when settings are auto.
+        adaptive_img_size = self._config.img_size is None
+        if self._device == "cuda" and self._config.optimization_mode == "auto" and adaptive_img_size:
+            try:
+                import torch
+
+                props = torch.cuda.get_device_properties(0)
+                total_vram_gb = props.total_memory / (1024**3)
+                if total_vram_gb <= 4.5:
+                    requested_img_size = 1024
+                    if requested_precision == "auto":
+                        requested_precision = "fp16"
+                    logger.info(
+                        "Low-VRAM adaptive profile enabled (%.1f GB): img_size=%d, precision=%s",
+                        total_vram_gb,
+                        requested_img_size,
+                        requested_precision,
+                    )
+            except Exception as e:
+                logger.debug("Low-VRAM adaptive profile check skipped: %s", e)
+        elif self._config.img_size is not None:
+            logger.info("Using explicit image size override: img_size=%d", requested_img_size)
+
         logger.info("Loading inference engine (device=%s)...", self._device)
         t0 = time.monotonic()
         self._engine = create_engine(
             checkpoint_dir=self._config.checkpoint_dir,
             device=self._device,
+            img_size=requested_img_size,
             optimization_mode=self._config.optimization_mode,
-            precision=self._config.precision,
+            precision=requested_precision,
         )
         self._engine_loaded = True
         logger.info("Engine loaded in %.1fs", time.monotonic() - t0)
+        runtime_cfg = self.get_engine_runtime_config()
+        if runtime_cfg is not None:
+            logger.info(
+                "Engine resolved config: backend=%s, device=%s, optimization=%s, precision=%s, img_size=%s",
+                runtime_cfg["backend"],
+                runtime_cfg["device"],
+                runtime_cfg["optimization_mode"],
+                runtime_cfg["precision"],
+                runtime_cfg["img_size"],
+            )
         return self._engine
 
     def load_engine(self) -> None:
@@ -391,6 +506,7 @@ class CorridorKeyService:
         skip_stems: set[str] | None = None,
         output_config: OutputConfig | None = None,
         frame_range: tuple[int, int] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> list[FrameResult]:
         """Run inference on a single clip.
 
@@ -451,46 +567,70 @@ class CorridorKeyService:
         write_executor = ThreadPoolExecutor(max_workers=1)
         pending_write: Future | None = None
 
-        def _flush_pending(warn_cb: Any) -> None:
+        stage_totals_ms: dict[str, float] = {
+            "read": 0.0,
+            "infer": 0.0,
+            "write_wait": 0.0,
+            "write_enqueue": 0.0,
+            "frame_total": 0.0,
+        }
+        progress_interval = max(1, min(10, range_count // 5 if range_count > 5 else 1))
+
+        def _flush_pending(warn_cb: Any) -> float:
             nonlocal pending_write
+            waited_s = 0.0
             if pending_write is not None:
+                t_wait = time.monotonic()
                 try:
                     pending_write.result()
                 except WriteFailureError as exc:
                     logger.error(str(exc))
                     if warn_cb:
                         warn_cb(str(exc))
+                waited_s = time.monotonic() - t_wait
                 pending_write = None
+            return waited_s
 
         try:
             for progress_i, i in enumerate(frame_indices):
+                t_frame_total = time.monotonic()
+                if cancel_event and cancel_event.is_set():
+                    stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
+                    raise JobCancelledError(clip.name, i)
                 if job and job.is_cancelled:
-                    _flush_pending(on_warning)
+                    stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
                     raise JobCancelledError(clip.name, i)
                 if on_progress:
                     on_progress(clip.name, progress_i, range_count)
                 try:
+                    t_read = time.monotonic()
                     img, input_stem, is_linear = self._read_input_frame(
                         clip, i, input_files, input_cap, params.input_is_linear
                     )
+                    read_ms = (time.monotonic() - t_read) * 1000.0
+                    stage_totals_ms["read"] += read_ms
                     if img is None:
-                        _flush_pending(on_warning)
+                        stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
                         skipped.append(i)
                         results.append(FrameResult(i, f"{i:05d}", False, "video read failed"))
                         continue
                     if input_stem in skip_stems:
                         results.append(FrameResult(i, input_stem, True, "resumed (skipped)"))
                         continue
+                    t_alpha = time.monotonic()
                     mask = self._read_alpha_frame(clip, i, alpha_files, alpha_cap)
+                    alpha_read_ms = (time.monotonic() - t_alpha) * 1000.0
+                    read_ms += alpha_read_ms
+                    stage_totals_ms["read"] += alpha_read_ms
                     if mask is None:
-                        _flush_pending(on_warning)
+                        stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
                         skipped.append(i)
                         results.append(FrameResult(i, input_stem, False, "alpha read failed"))
                         continue
                     if mask.shape[:2] != img.shape[:2]:
                         mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
 
-                    t_frame = time.monotonic()
+                    t_infer = time.monotonic()
                     with self._gpu_lock:
                         res = engine.process_frame(
                             img,
@@ -505,9 +645,11 @@ class CorridorKeyService:
                             edge_erode_px=params.edge_erode_px,
                             edge_blur_px=params.edge_blur_px,
                         )
-                    logger.debug("Clip '%s' frame %d: %.3fs", clip.name, i, time.monotonic() - t_frame)
+                    infer_ms = (time.monotonic() - t_infer) * 1000.0
+                    stage_totals_ms["infer"] += infer_ms
 
-                    _flush_pending(on_warning)
+                    wait_ms = _flush_pending(on_warning) * 1000.0
+                    stage_totals_ms["write_wait"] += wait_ms
                     write_cfg = output_config_to_write_config(cfg, dirs)
                     frame_out = ProcessedFrame(
                         alpha=res["alpha"],
@@ -518,7 +660,43 @@ class CorridorKeyService:
                         source_w=img.shape[1],
                         stem=input_stem,
                     )
+                    t_enqueue = time.monotonic()
                     pending_write = write_executor.submit(write_outputs, frame_out, write_cfg)
+                    enqueue_ms = (time.monotonic() - t_enqueue) * 1000.0
+                    stage_totals_ms["write_enqueue"] += enqueue_ms
+
+                    frame_total_ms = (time.monotonic() - t_frame_total) * 1000.0
+                    stage_totals_ms["frame_total"] += frame_total_ms
+
+                    logger.debug(
+                        "frame_timing clip=%s frame=%d stem=%s read_ms=%.1f infer_ms=%.1f write_wait_ms=%.1f "
+                        "write_enqueue_ms=%.1f total_ms=%.1f",
+                        clip.name,
+                        i,
+                        input_stem,
+                        read_ms,
+                        infer_ms,
+                        wait_ms,
+                        enqueue_ms,
+                        frame_total_ms,
+                    )
+
+                    processed_so_far = sum(1 for r in results if r.success) + 1
+                    if (
+                        processed_so_far % progress_interval == 0
+                        or processed_so_far == range_count
+                        or processed_so_far == 1
+                    ):
+                        elapsed = time.monotonic() - t_start
+                        fps = processed_so_far / elapsed if elapsed > 0 else 0.0
+                        logger.info(
+                            "Clip '%s': progress %d/%d (%.2f fps)",
+                            clip.name,
+                            processed_so_far,
+                            range_count,
+                            fps,
+                        )
+
                     results.append(FrameResult(i, input_stem, True))
                 except FrameReadError as e:
                     logger.warning(str(e))
@@ -532,11 +710,11 @@ class CorridorKeyService:
                     if on_warning:
                         on_warning(str(e))
 
-            _flush_pending(on_warning)
+            stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
             if on_progress:
                 on_progress(clip.name, range_count, range_count)
         finally:
-            _flush_pending(on_warning)
+            stage_totals_ms["write_wait"] += _flush_pending(on_warning) * 1000.0
             write_executor.shutdown(wait=True)
             if input_cap:
                 input_cap.release()
@@ -561,6 +739,17 @@ class CorridorKeyService:
             t_total,
             t_total / max(processed, 1),
         )
+        if processed > 0:
+            logger.info(
+                "Clip '%s': stage totals avg/frame read=%.1fms infer=%.1fms write_wait=%.1fms "
+                "write_enqueue=%.1fms total=%.1fms",
+                clip.name,
+                stage_totals_ms["read"] / processed,
+                stage_totals_ms["infer"] / processed,
+                stage_totals_ms["write_wait"] / processed,
+                stage_totals_ms["write_enqueue"] / processed,
+                stage_totals_ms["frame_total"] / processed,
+            )
 
         is_full_clip = frame_range is None or (frame_range[0] == 0 and frame_range[1] >= num_frames - 1)
         if processed == range_count and is_full_clip:
@@ -569,51 +758,80 @@ class CorridorKeyService:
             except Exception as e:
                 logger.warning("Clip '%s': state transition to COMPLETE failed: %s", clip.name, e)
 
-        if (
-            is_full_clip
-            and cfg.comp_enabled
-            and clip.input_asset is not None
-            and clip.input_asset.asset_type == "video"
-        ):
-            self._stitch_comp_video(clip, dirs["comp"], cfg.comp_format)
+        if is_full_clip and cfg.stitch_enabled:
+            self._stitch_outputs(clip, dirs, cfg)
 
         return results
 
-    def _stitch_comp_video(self, clip: ClipEntry, comp_dir: str, comp_format: str) -> None:
+    def _stitch_outputs(
+        self,
+        clip: ClipEntry,
+        dirs: dict[str, str],
+        cfg: OutputConfig,
+    ) -> None:
+        """Stitch all enabled output sequences into MP4 videos after inference.
+
+        Silently skipped if FFmpeg is not available. Called at the end of
+        run_inference when cfg.stitch_enabled is True.
+
+        Args:
+            clip: The clip that was just processed.
+            dirs: Output subdirectory paths keyed by output name.
+            cfg: OutputConfig controlling which outputs exist and stitch settings.
+        """
+        import contextlib
+        import re as _re
+
         from corridorkey.errors import FFmpegNotFoundError
         from corridorkey.ffmpeg_tools import read_video_metadata, require_ffmpeg, stitch_video
 
         try:
             require_ffmpeg()
         except FFmpegNotFoundError:
-            logger.debug("Clip '%s': FFmpeg not available, skipping comp video stitch", clip.name)
-            return
-
-        comp_frames = [f for f in os.listdir(comp_dir) if f.lower().endswith(f".{comp_format}")]
-        if not comp_frames:
+            logger.debug("Clip '%s': FFmpeg not available, skipping stitch", clip.name)
             return
 
         fps = 24.0
         meta = read_video_metadata(clip.root_path)
         if meta and "fps" in meta:
-            import contextlib
-
             with contextlib.suppress(ValueError, TypeError):
                 fps = float(meta["fps"])
 
-        import re as _re
+        output_root = dirs["root"]
+        subdir_map = {
+            "fg": ("fg", cfg.fg_format),
+            "matte": ("matte", cfg.matte_format),
+            "comp": ("comp", cfg.comp_format),
+            "processed": ("processed", cfg.processed_format),
+        }
 
-        first = sorted(comp_frames)[0]
-        stem = os.path.splitext(first)[0]
-        m = _re.search(r"(\d+)$", stem)
-        pattern = f"{stem[: -len(m.group(1))]}%0{len(m.group(1))}d.{comp_format}" if m else f"frame_%06d.{comp_format}"
+        for name, (dir_key, fmt) in subdir_map.items():
+            if name not in cfg.enabled_outputs:
+                continue
+            frames_dir = dirs.get(dir_key)
+            if not frames_dir or not os.path.isdir(frames_dir):
+                continue
+            frame_files = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(f".{fmt}"))
+            if not frame_files:
+                continue
 
-        comp_video_path = os.path.join(os.path.dirname(comp_dir), f"{clip.name}_comp.mp4")
-        try:
-            logger.info("Clip '%s': stitching comp video -> %s @ %.4f fps", clip.name, comp_video_path, fps)
-            stitch_video(comp_dir, comp_video_path, fps=fps, pattern=pattern)
-        except Exception as e:
-            logger.warning("Clip '%s': comp video stitch failed: %s", clip.name, e)
+            first_stem = os.path.splitext(frame_files[0])[0]
+            m = _re.search(r"(\d+)$", first_stem)
+            pattern = f"{first_stem[: -len(m.group(1))]}%0{len(m.group(1))}d.{fmt}" if m else f"frame_%06d.{fmt}"
+            out_path = os.path.join(output_root, f"{clip.name}_{name}.mp4")
+
+            try:
+                logger.info("Clip '%s': stitching %s -> %s @ %.4f fps", clip.name, name, out_path, fps)
+                stitch_video(
+                    frames_dir,
+                    out_path,
+                    fps=fps,
+                    pattern=pattern,
+                    codec=cfg.stitch_codec,
+                    crf=cfg.stitch_crf,
+                )
+            except Exception as e:
+                logger.warning("Clip '%s': stitch failed for '%s': %s", clip.name, name, e)
 
     def stitch_clip_outputs(
         self,

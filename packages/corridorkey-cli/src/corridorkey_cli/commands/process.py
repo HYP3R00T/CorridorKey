@@ -32,6 +32,13 @@ def process(
     precision: Annotated[
         str, typer.Option("-precision", help="Inference float format: auto, fp16, bf16, fp32.")
     ] = "auto",
+    img_size: Annotated[
+        int | None,
+        typer.Option(
+            "-img-size",
+            help="Internal inference resolution (e.g. 2048). Omit to keep adaptive auto sizing.",
+        ),
+    ] = None,
     despill: Annotated[float, typer.Option("-despill", help="Green spill removal strength (0.0-1.0).")] = 1.0,
     despeckle: Annotated[bool, typer.Option("-despeckle/-no-despeckle", help="Remove small matte artifacts.")] = True,
     despeckle_size: Annotated[int, typer.Option("-despeckle-size", help="Min artifact area in pixels.")] = 400,
@@ -115,6 +122,7 @@ def process(
             device=device,
             optimization_mode=optimization_mode,
             precision=precision,
+            img_size=img_size,
             on_progress=prog.on_progress,
             on_warning=prog.on_warning,
             on_clip_start=prog.on_clip_start,

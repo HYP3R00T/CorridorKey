@@ -17,10 +17,18 @@ from corridorkey_cli.commands.wizard import wizard
 
 app = typer.Typer(
     name="corridorkey",
-    help="AI green screen keyer - process clips from the command line.",
+    help="AI green screen keyer. Run with no arguments to launch the interactive wizard.",
     add_completion=False,
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
+
+
+@app.callback(invoke_without_command=True)
+def _default(ctx: typer.Context) -> None:
+    """Launch the interactive wizard when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        wizard()
+
 
 app.command("init")(init)
 app.command("doctor")(doctor)
