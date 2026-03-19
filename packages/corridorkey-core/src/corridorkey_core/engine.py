@@ -47,12 +47,12 @@ OPT_MODE_ENV_VAR = "CORRIDORKEY_OPT_MODE"
 
 
 def _probe_vram_gb() -> float:
-    """Return total GPU VRAM in GB using pynvml (driver-level, no CUDA context).
+    """Return total GPU VRAM in GB using nvidia-ml-py (imported as pynvml).
 
-    Falls back to torch.cuda if pynvml is unavailable. Returns 0.0 if both fail.
+    Falls back to torch.cuda if NVML is unavailable. Returns 0.0 if both fail.
     """
     try:
-        import pynvml  # type: ignore[import-not-found]
+        import pynvml
 
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
@@ -95,7 +95,7 @@ class CorridorKeyEngine:  # pragma: no cover
             mixed_precision: Whether to run inference in fp16 autocast.
             model_precision: Weight dtype for the model (float32 or float16).
             optimization_mode: Refiner execution strategy.
-                "auto"    - probe VRAM via pynvml; < 12 GB -> lowvram, else -> speed.
+                "auto"    - probe VRAM via nvidia-ml-py (pynvml); < 12 GB -> lowvram, else -> speed.
                 "speed"   - full 2048x2048 refiner pass + torch.compile.
                 "lowvram" - tiled refiner (512x512, 128px overlap) + torch.compile.
                 MPS always forces "lowvram" (Triton does not support Metal).

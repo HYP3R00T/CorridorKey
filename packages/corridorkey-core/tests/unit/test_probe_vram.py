@@ -1,6 +1,6 @@
 """Unit tests for _probe_vram_gb in pipeline/engine.py.
 
-Tests all three resolution paths: pynvml success, pynvml unavailable -> torch
+Tests all three resolution paths: NVML success, NVML unavailable -> torch
 fallback, and both unavailable -> 0.0. No GPU required.
 """
 
@@ -12,10 +12,10 @@ from corridorkey_core.engine import _probe_vram_gb
 
 
 class TestProbeVramGb:
-    """_probe_vram_gb - VRAM detection with pynvml and torch fallbacks."""
+    """_probe_vram_gb - VRAM detection with NVML and torch fallbacks."""
 
     def test_pynvml_success(self):
-        """When pynvml is available and succeeds, must return total VRAM in GB."""
+        """When NVML is available and succeeds, must return total VRAM in GB."""
         mock_pynvml = MagicMock()
         mock_mem = MagicMock()
         mock_mem.total = 8 * 1024**3  # 8 GB
@@ -27,7 +27,7 @@ class TestProbeVramGb:
         assert abs(result - 8.0) < 0.01
 
     def test_pynvml_failure_falls_back_to_torch(self):
-        """When pynvml raises, must fall back to torch.cuda."""
+        """When NVML raises, must fall back to torch.cuda."""
         mock_pynvml = MagicMock()
         mock_pynvml.nvmlInit.side_effect = Exception("pynvml unavailable")
 
@@ -44,7 +44,7 @@ class TestProbeVramGb:
         assert abs(result - 12.0) < 0.01
 
     def test_both_unavailable_returns_zero(self):
-        """When both pynvml and torch.cuda fail, must return 0.0."""
+        """When both NVML and torch.cuda fail, must return 0.0."""
         mock_pynvml = MagicMock()
         mock_pynvml.nvmlInit.side_effect = Exception("no pynvml")
 
