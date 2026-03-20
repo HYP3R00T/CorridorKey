@@ -14,8 +14,12 @@ from pathlib import Path
 def scan(path: str | Path) -> list[Clip]:
     """Scan a directory for processable clips.
 
+    Accepts either:
+    - A clips directory containing multiple clip subfolders
+    - A single clip folder directly (must contain Input/Frames and AlphaHint)
+
     Args:
-        path: Path to the directory containing clip folders.
+        path: Path to a clips directory or a single clip folder.
 
     Returns:
         List of Clip objects in READY state.
@@ -30,6 +34,12 @@ def scan(path: str | Path) -> list[Clip]:
     if not path.is_dir():
         raise ValueError(f"Path is not a directory: {path}")
 
+    # If the path itself looks like a clip, treat it as a single clip.
+    clip = _try_build_clip(path)
+    if clip is not None:
+        return [clip]
+
+    # Otherwise scan subdirectories for clips.
     clips = []
     for item in sorted(path.iterdir()):
         if not item.is_dir():
