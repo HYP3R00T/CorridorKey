@@ -11,6 +11,7 @@ members = [
     "corridorkey",
     "corridorkey-cli",
     "corridorkey-core",
+    "corridorkey-new",
     "corridorkey-workspace",
 ]
 
@@ -246,6 +247,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "corridorkey-new"
+version = "0.1.0"
+source = { editable = "packages/corridorkey-new" }
+
+[[package]]
 name = "corridorkey-workspace"
 version = "2.0.0"
 source = { virtual = "." }
@@ -261,6 +267,7 @@ mlx = [
 [package.dev-dependencies]
 dev = [
     { name = "corridorkey-cli" },
+    { name = "corridorkey-new" },
     { name = "git-cliff" },
     { name = "hypothesis" },
     { name = "prek" },
@@ -285,6 +292,7 @@ provides-extras = ["cuda", "mlx"]
 [package.metadata.requires-dev]
 dev = [
     { name = "corridorkey-cli", editable = "packages/corridorkey-cli" },
+    { name = "corridorkey-new", editable = "packages/corridorkey-new" },
     { name = "git-cliff", specifier = ">=2.12.0" },
     { name = "hypothesis", specifier = ">=6.151.9" },
     { name = "prek", specifier = ">=0.3.5" },

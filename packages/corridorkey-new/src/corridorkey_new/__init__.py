@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from corridorkey-new!")
+from corridorkey_new.main import main
+
+__all__ = ["main"]
