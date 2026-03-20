@@ -48,3 +48,139 @@ class TestCorridorKeyConfigOverrides:
     def test_override_device(self):
         config = CorridorKeyConfig(device="cpu")
         assert config.device == "cpu"
+
+
+class TestPreprocessSettings:
+    def test_defaults(self):
+        cfg = CorridorKeyConfig()
+        assert cfg.preprocess.img_size == 2048
+        assert cfg.preprocess.resize_strategy == "squish"
+
+    def test_override_img_size(self):
+        from corridorkey_new.infra.config import PreprocessSettings
+
+        cfg = CorridorKeyConfig(preprocess=PreprocessSettings(img_size=512))
+        assert cfg.preprocess.img_size == 512
+
+    def test_override_resize_strategy(self):
+        from corridorkey_new.infra.config import PreprocessSettings
+
+        cfg = CorridorKeyConfig(preprocess=PreprocessSettings(resize_strategy="letterbox"))
+        assert cfg.preprocess.resize_strategy == "letterbox"
+
+    def test_invalid_resize_strategy_raises(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            CorridorKeyConfig(preprocess={"resize_strategy": "crop"})  # type: ignore[arg-type]
+
+    def test_img_size_minimum(self):
+        from corridorkey_new.infra.config import PreprocessSettings
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PreprocessSettings(img_size=32)  # below ge=64
+
+
+class TestInferenceSettings:
+    def test_defaults(self):
+        cfg = CorridorKeyConfig()
+        assert cfg.inference.checkpoint_path is None
+        assert cfg.inference.use_refiner is True
+        assert cfg.inference.mixed_precision is True
+        assert cfg.inference.model_precision == "float32"
+        assert cfg.inference.optimization_mode == "auto"
+
+    def test_override_checkpoint_path(self, tmp_path):
+        from corridorkey_new.infra.config import InferenceSettings
+
+        p = tmp_path / "model.pth"
+        cfg = CorridorKeyConfig(inference=InferenceSettings(checkpoint_path=p))
+        assert cfg.inference.checkpoint_path == p
+
+    def test_override_optimization_mode(self):
+        from corridorkey_new.infra.config import InferenceSettings
+
+        cfg = CorridorKeyConfig(inference=InferenceSettings(optimization_mode="lowvram"))
+        assert cfg.inference.optimization_mode == "lowvram"
+
+    def test_invalid_optimization_mode_raises(self):
+        from corridorkey_new.infra.config import InferenceSettings
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            InferenceSettings(optimization_mode="turbo")  # type: ignore[arg-type]
+
+    def test_invalid_model_precision_raises(self):
+        from corridorkey_new.infra.config import InferenceSettings
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            InferenceSettings(model_precision="bfloat16")  # type: ignore[arg-type]
+
+
+class TestBridgeMethods:
+    def test_to_preprocess_config_defaults(self):
+        cfg = CorridorKeyConfig(device="cpu")
+        pc = cfg.to_preprocess_config()
+        assert pc.img_size == 2048
+        assert pc.device == "cpu"
+        assert pc.resize_strategy == "squish"
+
+    def test_to_preprocess_config_device_override(self):
+        cfg = CorridorKeyConfig(device="cuda")
+        pc = cfg.to_preprocess_config(device="cpu")
+        assert pc.device == "cpu"
+
+    def test_to_preprocess_config_respects_img_size(self):
+        from corridorkey_new.infra.config import PreprocessSettings
+
+        cfg = CorridorKeyConfig(device="cpu", preprocess=PreprocessSettings(img_size=512))
+        pc = cfg.to_preprocess_config()
+        assert pc.img_size == 512
+
+    def test_to_inference_config_raises_without_checkpoint(self):
+        cfg = CorridorKeyConfig(device="cpu")
+        with pytest.raises(ValueError, match="checkpoint_path"):
+            cfg.to_inference_config()
+
+    def test_to_inference_config_basic(self, tmp_path):
+        import torch
+        from corridorkey_new.infra.config import InferenceSettings
+
+        p = tmp_path / "model.pth"
+        cfg = CorridorKeyConfig(device="cpu", inference=InferenceSettings(checkpoint_path=p))
+        ic = cfg.to_inference_config()
+        assert ic.checkpoint_path == p
+        assert ic.device == "cpu"
+        assert ic.img_size == 2048
+        assert ic.model_precision == torch.float32
+
+    def test_to_inference_config_float16_precision(self, tmp_path):
+        import torch
+        from corridorkey_new.infra.config import InferenceSettings
+
+        p = tmp_path / "model.pth"
+        cfg = CorridorKeyConfig(device="cpu", inference=InferenceSettings(checkpoint_path=p, model_precision="float16"))
+        ic = cfg.to_inference_config()
+        assert ic.model_precision == torch.float16
+
+    def test_to_inference_config_device_override(self, tmp_path):
+        from corridorkey_new.infra.config import InferenceSettings
+
+        p = tmp_path / "model.pth"
+        cfg = CorridorKeyConfig(device="cuda", inference=InferenceSettings(checkpoint_path=p))
+        ic = cfg.to_inference_config(device="cpu")
+        assert ic.device == "cpu"
+
+    def test_to_inference_config_img_size_from_preprocess(self, tmp_path):
+        from corridorkey_new.infra.config import InferenceSettings, PreprocessSettings
+
+        p = tmp_path / "model.pth"
+        cfg = CorridorKeyConfig(
+            device="cpu",
+            preprocess=PreprocessSettings(img_size=1024),
+            inference=InferenceSettings(checkpoint_path=p),
+        )
+        ic = cfg.to_inference_config()
+        assert ic.img_size == 1024

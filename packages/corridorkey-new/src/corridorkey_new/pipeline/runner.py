@@ -22,6 +22,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 
+from corridorkey_new.inference import InferenceConfig
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.pipeline.queue import BoundedQueue
 from corridorkey_new.pipeline.worker import InferenceWorker, PostWriteWorker, PreprocessWorker
@@ -36,12 +37,15 @@ class PipelineConfig:
 
     Attributes:
         preprocess: Preprocessing stage config (img_size, device, strategy).
+        inference: Inference stage config (checkpoint, device, precision).
+            None means inference is skipped (preprocess-only mode).
         input_queue_depth: Max preprocessed frames waiting for inference.
             Keep small — each frame is ~64MB on GPU at 2048 resolution.
         output_queue_depth: Max inference outputs waiting for postprocessing.
     """
 
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
+    inference: InferenceConfig | None = None
     input_queue_depth: int = 2
     output_queue_depth: int = 2
 
@@ -83,7 +87,8 @@ class PipelineRunner:
         inference_worker = InferenceWorker(
             input_queue=input_queue,
             output_queue=output_queue,
-            model=None,  # replaced when inference stage is built
+            model=None,  # type: ignore[arg-type]  # replaced when model is loaded
+            config=cfg.inference or InferenceConfig(checkpoint_path=manifest.output_dir),  # placeholder
         )
         postwrite_worker = PostWriteWorker(
             input_queue=output_queue,

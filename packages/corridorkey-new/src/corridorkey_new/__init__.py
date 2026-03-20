@@ -72,9 +72,17 @@ FrameMeta
     postprocessing so outputs can be resized back to source resolution.
 """
 
+from corridorkey_new.inference import (
+    InferenceConfig,
+    InferenceResult,
+    load_model,
+    run_inference,
+)
 from corridorkey_new.infra import (
     CorridorKeyConfig,
     GPUInfo,
+    InferenceSettings,
+    PreprocessSettings,
     detect_gpu,
     load_config,
     resolve_device,
@@ -113,5 +121,12 @@ __all__ = [
     "detect_gpu",
     # Config / device types
     "CorridorKeyConfig",
+    "PreprocessSettings",
+    "InferenceSettings",
     "GPUInfo",
+    # Inference
+    "load_model",
+    "run_inference",
+    "InferenceConfig",
+    "InferenceResult",
 ]

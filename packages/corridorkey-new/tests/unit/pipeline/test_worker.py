@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
+import torch
+from corridorkey_new.inference import InferenceConfig, InferenceResult
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.pipeline.queue import STOP, BoundedQueue
 from corridorkey_new.pipeline.worker import InferenceWorker, PostWriteWorker, PreprocessWorker
-from corridorkey_new.preprocessor import FrameReadError, PreprocessConfig, PreprocessedFrame
+from corridorkey_new.preprocessor import FrameMeta, FrameReadError, PreprocessConfig, PreprocessedFrame
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -189,48 +191,86 @@ class TestPreprocessWorker:
 
 
 class TestInferenceWorker:
-    def _make_fake_frame(self) -> MagicMock:
-        return MagicMock(spec=PreprocessedFrame)
+    """InferenceWorker tests mock run_inference — no checkpoint required.
 
-    def test_passes_items_through(self):
+    We test queue/threading behaviour only; the inference logic itself
+    is tested in tests/unit/inference/.
+    """
+
+    def _make_config(self, tmp_path: Path) -> InferenceConfig:
+        # checkpoint_path must be a Path; the file doesn't need to exist
+        # because run_inference is mocked in all these tests.
+        return InferenceConfig(checkpoint_path=tmp_path / "model.pth", device="cpu")
+
+    def _make_fake_frame(self) -> PreprocessedFrame:
+        meta = FrameMeta(frame_index=0, original_h=64, original_w=64)
+        tensor = torch.zeros(1, 4, 32, 32)
+        return PreprocessedFrame(tensor=tensor, meta=meta)
+
+    def _make_fake_result(self, frame: PreprocessedFrame) -> InferenceResult:
+        return InferenceResult(
+            alpha=torch.zeros(1, 1, 32, 32),
+            fg=torch.zeros(1, 3, 32, 32),
+            meta=frame.meta,
+        )
+
+    def test_passes_items_through(self, tmp_path: Path):
         in_q: BoundedQueue = BoundedQueue(10)
         out_q: BoundedQueue = BoundedQueue(10)
 
         frame = self._make_fake_frame()
+        result = self._make_fake_result(frame)
         in_q.put(frame)
         in_q.put_stop()
 
-        worker = InferenceWorker(input_queue=in_q, output_queue=out_q, model=None)
-        t = worker.start()
-        t.join(timeout=5)
+        with patch("corridorkey_new.pipeline.worker.run_inference", return_value=result):
+            worker = InferenceWorker(
+                input_queue=in_q,
+                output_queue=out_q,
+                model=MagicMock(),
+                config=self._make_config(tmp_path),
+            )
+            t = worker.start()
+            t.join(timeout=5)
 
-        assert out_q.get() is frame
+        assert out_q.get() is result
         assert out_q.get() is STOP
 
-    def test_stop_propagates_downstream(self):
+    def test_stop_propagates_downstream(self, tmp_path: Path):
         in_q: BoundedQueue = BoundedQueue(10)
         out_q: BoundedQueue = BoundedQueue(10)
-
         in_q.put_stop()
 
-        worker = InferenceWorker(input_queue=in_q, output_queue=out_q, model=None)
+        worker = InferenceWorker(
+            input_queue=in_q,
+            output_queue=out_q,
+            model=MagicMock(),
+            config=self._make_config(tmp_path),
+        )
         t = worker.start()
         t.join(timeout=5)
 
         assert out_q.get() is STOP
 
-    def test_multiple_frames_passed_through(self):
+    def test_multiple_frames_passed_through(self, tmp_path: Path):
         in_q: BoundedQueue = BoundedQueue(10)
         out_q: BoundedQueue = BoundedQueue(10)
 
         frames = [self._make_fake_frame() for _ in range(4)]
+        results = [self._make_fake_result(f) for f in frames]
         for f in frames:
             in_q.put(f)
         in_q.put_stop()
 
-        worker = InferenceWorker(input_queue=in_q, output_queue=out_q, model=None)
-        t = worker.start()
-        t.join(timeout=5)
+        with patch("corridorkey_new.pipeline.worker.run_inference", side_effect=results):
+            worker = InferenceWorker(
+                input_queue=in_q,
+                output_queue=out_q,
+                model=MagicMock(),
+                config=self._make_config(tmp_path),
+            )
+            t = worker.start()
+            t.join(timeout=5)
 
         received = []
         while True:
@@ -239,7 +279,56 @@ class TestInferenceWorker:
                 break
             received.append(item)
 
-        assert received == frames
+        assert received == results
+
+    def test_inference_error_skips_frame(self, tmp_path: Path):
+        """An exception from run_inference skips the frame but doesn't abort."""
+        in_q: BoundedQueue = BoundedQueue(10)
+        out_q: BoundedQueue = BoundedQueue(10)
+
+        frame1 = self._make_fake_frame()
+        frame2 = self._make_fake_frame()
+        result2 = self._make_fake_result(frame2)
+        in_q.put(frame1)
+        in_q.put(frame2)
+        in_q.put_stop()
+
+        def side_effect(frame, model, config):
+            if frame is frame1:
+                raise RuntimeError("simulated inference failure")
+            return result2
+
+        with patch("corridorkey_new.pipeline.worker.run_inference", side_effect=side_effect):
+            worker = InferenceWorker(
+                input_queue=in_q,
+                output_queue=out_q,
+                model=MagicMock(),
+                config=self._make_config(tmp_path),
+            )
+            t = worker.start()
+            t.join(timeout=5)
+
+        assert out_q.get() is result2
+        assert out_q.get() is STOP
+
+    def test_stop_sent_even_on_all_errors(self, tmp_path: Path):
+        in_q: BoundedQueue = BoundedQueue(10)
+        out_q: BoundedQueue = BoundedQueue(10)
+
+        in_q.put(self._make_fake_frame())
+        in_q.put_stop()
+
+        with patch("corridorkey_new.pipeline.worker.run_inference", side_effect=RuntimeError("boom")):
+            worker = InferenceWorker(
+                input_queue=in_q,
+                output_queue=out_q,
+                model=MagicMock(),
+                config=self._make_config(tmp_path),
+            )
+            t = worker.start()
+            t.join(timeout=5)
+
+        assert out_q.get() is STOP
 
 
 # ---------------------------------------------------------------------------
@@ -248,14 +337,19 @@ class TestInferenceWorker:
 
 
 class TestPostWriteWorker:
-    def _make_fake_frame(self) -> MagicMock:
-        return MagicMock(spec=PreprocessedFrame)
+    def _make_fake_result(self) -> InferenceResult:
+        meta = FrameMeta(frame_index=0, original_h=64, original_w=64)
+        return InferenceResult(
+            alpha=torch.zeros(1, 1, 32, 32),
+            fg=torch.zeros(1, 3, 32, 32),
+            meta=meta,
+        )
 
     def test_drains_queue_and_exits(self, tmp_path: Path):
         in_q: BoundedQueue = BoundedQueue(10)
 
         for _ in range(3):
-            in_q.put(self._make_fake_frame())
+            in_q.put(self._make_fake_result())
         in_q.put_stop()
 
         worker = PostWriteWorker(input_queue=in_q, output_dir=tmp_path)

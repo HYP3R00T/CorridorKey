@@ -5,11 +5,8 @@ to an output queue. Workers exit cleanly when they receive the STOP sentinel.
 
 Workers:
     PreprocessWorker   — reads frames from disk, preprocesses, pushes tensors
-    InferenceWorker    — pulls tensors, runs model, pushes raw outputs   [stub]
-    PostWriteWorker    — pulls raw outputs, postprocesses, writes to disk [stub]
-
-Stubs are in place so the pipeline wiring is complete. They will be filled in
-when inference and postprocessing stages are built.
+    InferenceWorker    — pulls tensors, runs model, pushes InferenceResult
+    PostWriteWorker    — pulls InferenceResult, postprocesses, writes to disk [stub]
 """
 
 from __future__ import annotations
@@ -18,12 +15,14 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
+import torch.nn as nn
+
+from corridorkey_new.inference import InferenceConfig, InferenceResult, run_inference
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.loader.validator import get_frame_files
 from corridorkey_new.pipeline.queue import STOP, BoundedQueue
-from corridorkey_new.preprocessor import FrameReadError, PreprocessConfig, preprocess_frame
+from corridorkey_new.preprocessor import FrameReadError, PreprocessConfig, PreprocessedFrame, preprocess_frame
 
 logger = logging.getLogger(__name__)
 
@@ -87,21 +86,26 @@ class PreprocessWorker:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Inference worker
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class InferenceWorker:
-    """Pulls PreprocessedFrame, runs model inference, pushes raw outputs.
-
-    Stub — will be implemented when the inference stage is built.
+    """Pulls PreprocessedFrame, runs model inference, pushes InferenceResult.
 
     Attributes:
         input_queue: Queue to pull PreprocessedFrame objects from.
-        output_queue: Queue to push inference outputs onto.
-        model: The inference model (type TBD when inference stage is built).
+        output_queue: Queue to push InferenceResult objects onto.
+        model: Loaded GreenFormer in eval mode.
+        config: Inference configuration (device, precision, optimization mode).
     """
 
     input_queue: BoundedQueue
     output_queue: BoundedQueue
-    model: Any  # replaced with the real model type when inference is built
+    model: nn.Module
+    config: InferenceConfig
 
     def run(self) -> None:
         """Entry point for the inference thread."""
@@ -109,11 +113,15 @@ class InferenceWorker:
             while True:
                 item = self.input_queue.get()
                 if item is STOP:
-                    self.input_queue.put_stop()  # propagate to next consumer
+                    self.input_queue.put_stop()
                     break
-                # TODO: run inference on item, push result to output_queue
-                logger.debug("inference_worker: received frame (stub — not yet implemented)")
-                self.output_queue.put(item)  # pass-through until implemented
+                assert isinstance(item, PreprocessedFrame)
+                try:
+                    result = run_inference(item, self.model, self.config)
+                    self.output_queue.put(result)
+                    logger.debug("inference_worker: queued frame %d", item.meta.frame_index)
+                except Exception as e:
+                    logger.error("inference_worker: skipping frame %d — %s", item.meta.frame_index, e)
         finally:
             self.output_queue.put_stop()
             logger.debug("inference_worker: sent STOP")
@@ -132,12 +140,12 @@ class InferenceWorker:
 
 @dataclass
 class PostWriteWorker:
-    """Pulls inference outputs, postprocesses, and writes frames to disk.
+    """Pulls InferenceResult, postprocesses, and writes frames to disk.
 
     Stub — will be implemented when postprocessing and writing stages are built.
 
     Attributes:
-        input_queue: Queue to pull inference outputs from.
+        input_queue: Queue to pull InferenceResult objects from.
         output_dir: Directory to write output frames into.
     """
 
@@ -149,10 +157,11 @@ class PostWriteWorker:
         while True:
             item = self.input_queue.get()
             if item is STOP:
-                self.input_queue.put_stop()  # propagate sentinel
+                self.input_queue.put_stop()
                 break
+            assert isinstance(item, InferenceResult)
             # TODO: postprocess item, write outputs to output_dir
-            logger.debug("postwrite_worker: received frame (stub — not yet implemented)")
+            logger.debug("postwrite_worker: received frame %d (stub)", item.meta.frame_index)
 
         logger.debug("postwrite_worker: done")
 
