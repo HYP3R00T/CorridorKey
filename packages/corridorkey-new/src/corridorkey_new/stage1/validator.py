@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from corridorkey_new.entrypoint import Clip
-from corridorkey_new.utils import natural_sort_key
+from corridorkey_new.infra.utils import natural_sort_key
 
 IMAGE_EXTENSIONS = frozenset({".exr", ".png", ".jpg", ".jpeg", ".tiff", ".tif"})
 LINEAR_EXTENSIONS = frozenset({".exr"})

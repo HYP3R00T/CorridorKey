@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from corridorkey_new.config import CorridorKeyConfig
+from corridorkey_new.infra.config import CorridorKeyConfig
 
 _FILE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
