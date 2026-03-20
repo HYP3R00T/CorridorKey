@@ -27,7 +27,6 @@ def main() -> None:
     print(gpu.model_dump_json(indent=2))
 
     clips = scan(CLIPS_DIR)
-    print(f"Found {len(clips)} clip(s)")
 
     manifest = load(clips[0])
     print(manifest.model_dump_json(indent=2))

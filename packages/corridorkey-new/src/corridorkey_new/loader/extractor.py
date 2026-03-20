@@ -53,7 +53,7 @@ def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06
     try:
         for packet in container.demux(stream):
             for frame in packet.decode():
-                # Convert to BGR numpy array for cv2
+                # Decode directly to BGR for cv2.imwrite (PNG on disk is BGR)
                 bgr = frame.to_ndarray(format="bgr24")
                 out_path = output_dir / pattern.format(frame_index)
                 cv2.imwrite(str(out_path), bgr)

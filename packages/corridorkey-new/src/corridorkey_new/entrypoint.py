@@ -143,7 +143,7 @@ def _try_build_clip(clip_dir: Path) -> Clip | None:
     if input_path is None:
         return None
 
-    alpha_path = _find_alpha(clip_dir)  # None if absent - stage 2 will generate it
+    alpha_path = _find_alpha(clip_dir)  # None if absent — interface must generate alpha externally
 
     try:
         return Clip(
@@ -198,7 +198,8 @@ class Clip(BaseModel):
         root: Absolute path to the clip folder.
         input_path: Path to the input asset. Either the Input/ directory (for
             pre-structured clips) or a video file inside Input/ (for normalised videos).
-        alpha_path: Path to the alpha hint asset. None if absent (stage 2 required).
+        alpha_path: Path to the alpha hint asset. None if absent — the interface
+            must generate alpha externally and call resolve_alpha() before proceeding.
     """
 
     name: str
