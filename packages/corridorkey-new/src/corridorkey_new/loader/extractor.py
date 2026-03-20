@@ -43,7 +43,7 @@ def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06
 
     try:
         container = av.open(str(video_path))
-    except av.AVError as e:
+    except av.FFmpegError as e:
         raise RuntimeError(f"Cannot open video '{video_path}': {e}") from e
 
     stream = container.streams.video[0]
@@ -58,7 +58,7 @@ def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06
                 out_path = output_dir / pattern.format(frame_index)
                 cv2.imwrite(str(out_path), bgr)
                 frame_index += 1
-    except av.AVError as e:
+    except av.FFmpegError as e:
         raise RuntimeError(f"Error decoding '{video_path}' at frame {frame_index}: {e}") from e
     finally:
         container.close()

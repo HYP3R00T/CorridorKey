@@ -300,6 +300,13 @@ mlx = [
     { name = "corridorkey-mlx" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "av", specifier = ">=14.0.0" },
@@ -311,6 +318,13 @@ requires-dist = [
     { name = "utilityhub-config", specifier = ">=0.2.3" },
 ]
 provides-extras = ["cuda", "rocm", "mlx"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.151.9" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "corridorkey-workspace"

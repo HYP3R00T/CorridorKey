@@ -16,35 +16,35 @@ rocm = ["corridorkey-new[rocm] ; sys_platform == 'linux'"]
 
 [dependency-groups]
 dev = [
-  "corridorkey-cli>=0.1.0",
-  "corridorkey-new>=0.1.0",
-  "git-cliff>=2.12.0",
-  "hypothesis>=6.151.9",
-  "prek>=0.3.5",
-  "pytest>=9.0.2",
-  "pytest-cov>=7.0.0",
-  "ruff>=0.15.5",
-  "shellcheck-py>=0.11.0.1",
-  "ty>=0.0.21",
+    "corridorkey-cli>=0.1.0",
+    "corridorkey-new>=0.1.0",
+    "git-cliff>=2.12.0",
+    "hypothesis>=6.151.9",
+    "prek>=0.3.5",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.5",
+    "shellcheck-py>=0.11.0.1",
+    "ty>=0.0.21",
 ]
 docs = ["mkdocstrings[python]>=1.0.3", "zensical>=0.0.26"]
 
 [tool.pytest.ini_options]
 markers = [
-  "gpu: requires CUDA GPU (skipped in CI)",
-  "slow: long-running test",
-  "mlx: requires Apple Silicon with MLX installed",
+    "gpu: requires CUDA GPU (skipped in CI)",
+    "slow: long-running test",
+    "mlx: requires Apple Silicon with MLX installed",
 ]
 addopts = "--tb=short"
 
 [tool.coverage.run]
 omit = [
-  # Hardware-dependent modules - require real GPU/FFmpeg/filesystem
-  "*/corridorkey/service.py",
-  "*/corridorkey/ffmpeg_tools.py",
-  "*/corridorkey/frame_io.py",
-  "*/corridorkey/device_utils.py",
-  "*/corridorkey_core/inference_engine.py",
+    # Hardware-dependent modules - require real GPU/FFmpeg/filesystem
+    "*/corridorkey/service.py",
+    "*/corridorkey/ffmpeg_tools.py",
+    "*/corridorkey/frame_io.py",
+    "*/corridorkey/device_utils.py",
+    "*/corridorkey_core/inference_engine.py",
 ]
 
 [tool.coverage.report]
@@ -55,18 +55,18 @@ members = ["packages/*"]
 
 [tool.uv]
 conflicts = [
-  [
-    { extra = "cuda" },
-    { extra = "mlx" },
-  ],
-  [
-    { extra = "cuda" },
-    { extra = "rocm" },
-  ],
-  [
-    { extra = "rocm" },
-    { extra = "mlx" },
-  ],
+    [
+        { extra = "cuda" },
+        { extra = "mlx" },
+    ],
+    [
+        { extra = "cuda" },
+        { extra = "rocm" },
+    ],
+    [
+        { extra = "rocm" },
+        { extra = "mlx" },
+    ],
 ]
 
 [tool.uv.sources]

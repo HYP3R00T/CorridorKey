@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Corridor Digital" }]
-maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
+maintainers = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
 requires-python = ">=3.13"
 dependencies = [
   "pydantic>=2.0",
@@ -12,6 +12,9 @@ dependencies = [
   "opencv-python>=4.13.0.92",
   "av>=14.0.0",
 ]
+
+[dependency-groups]
+dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "hypothesis>=6.151.9"]
 
 [project.optional-dependencies]
 cuda = ["torch==2.10.0", "torchvision==0.25.0"]
@@ -53,6 +56,24 @@ corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git"
 
 [project.scripts]
 ck = "corridorkey_new.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "gpu: requires CUDA GPU (skipped in CI)",
+  "slow: long-running test",
+  "mlx: requires Apple Silicon with MLX installed",
+]
+
+[tool.coverage.run]
+omit = [
+  "*/corridorkey_new/infra/device_utils.py",
+  "*/corridorkey_new/loader/extractor.py",
+  "*/corridorkey_new/main.py",
+]
+
+[tool.coverage.report]
+fail_under = 75
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]
