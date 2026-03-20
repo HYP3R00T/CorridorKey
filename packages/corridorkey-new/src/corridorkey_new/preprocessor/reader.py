@@ -9,10 +9,13 @@ Not part of the public API — called by stage.py.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class FrameReadError(Exception):
@@ -46,11 +49,17 @@ def _read_frame_pair(
     alpha = _read_image(alpha_path, channels=1)
 
     if image.shape[:2] != alpha.shape[:2]:
-        raise FrameReadError(
-            f"Image and alpha spatial dimensions do not match: "
-            f"image {image.shape[:2]} vs alpha {alpha.shape[:2]} "
-            f"(image={image_path.name}, alpha={alpha_path.name})"
+        logger.warning(
+            "Alpha dimensions %s do not match image dimensions %s — "
+            "resizing alpha to match (image=%s, alpha=%s). "
+            "Consider regenerating alpha at the correct resolution.",
+            alpha.shape[:2],
+            image.shape[:2],
+            image_path.name,
+            alpha_path.name,
         )
+        alpha_resized = cv2.resize(alpha[:, :, 0], (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR)
+        alpha = alpha_resized[:, :, np.newaxis]
 
     return image, alpha
 
