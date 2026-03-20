@@ -2,7 +2,7 @@ from pathlib import Path
 
 from corridorkey_new import detect_gpu, load, load_config, resolve_alpha, scan, setup_logging
 
-CLIPS_DIR = Path(r"C:\Users\Rajes\Downloads\Samples\sample_inputs")
+CLIPS_DIR = Path(r"C:\Users\Rajes\Downloads\Samples\sample_inputs_mod")
 
 
 def _generate_alpha_externally(manifest) -> Path:

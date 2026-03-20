@@ -158,21 +158,46 @@ def _try_build_clip(clip_dir: Path) -> Clip | None:
 
 
 def _find_input(clip_dir: Path) -> Path | None:
-    """Locate the Input/ directory inside a clip folder (case-insensitive).
+    """Locate the input asset inside a clip folder (case-insensitive).
+
+    If Input/ contains a video file, returns the video path so stage 1 can
+    extract it. If Input/ contains image frames, returns the directory.
 
     Raises:
         PermissionError: If clip_dir cannot be read.
     """
-    return _find_icase(clip_dir, "Input")
+    input_dir = _find_icase(clip_dir, "Input")
+    if input_dir is None:
+        return None
+    video = _find_video_in(input_dir)
+    return video if video is not None else input_dir
 
 
 def _find_alpha(clip_dir: Path) -> Path | None:
-    """Locate the AlphaHint/ asset inside a clip folder (case-insensitive).
+    """Locate the AlphaHint asset inside a clip folder (case-insensitive).
+
+    If AlphaHint/ contains a video file, returns the video path. Otherwise
+    returns the directory (image sequence).
 
     Raises:
         PermissionError: If clip_dir cannot be read.
     """
-    return _find_icase(clip_dir, "AlphaHint")
+    alpha_dir = _find_icase(clip_dir, "AlphaHint")
+    if alpha_dir is None:
+        return None
+    video = _find_video_in(alpha_dir)
+    return video if video is not None else alpha_dir
+
+
+def _find_video_in(directory: Path) -> Path | None:
+    """Return the first video file found in a directory, or None."""
+    try:
+        for child in directory.iterdir():
+            if child.is_file() and child.suffix.lower() in VIDEO_EXTENSIONS:
+                return child
+    except PermissionError:
+        pass
+    return None
 
 
 def _find_icase(parent: Path, name: str) -> Path | None:
