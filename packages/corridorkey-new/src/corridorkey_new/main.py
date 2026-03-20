@@ -18,7 +18,11 @@ def main() -> None:
     print(type(gpu))
 
     clips = scan(CLIPS_DIR)
+    print(f"Found {len(clips)} clip(s)")
     for clip in clips:
         manifest = load(clip)
         print(manifest)
-        print(type(manifest))
+        if manifest.needs_alpha:
+            print(f"  → stage 2 required for '{manifest.clip_name}'")
+        else:
+            print(f"  → ready for stage 3 ({manifest.frame_count} frames, linear={manifest.is_linear})")

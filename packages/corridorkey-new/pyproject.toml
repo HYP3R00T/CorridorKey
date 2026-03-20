@@ -7,10 +7,12 @@ authors = [{ name = "Corridor Digital" }]
 maintainers = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
 requires-python = ">=3.13"
 dependencies = [
-  "pydantic>=2.0",
-  "utilityhub_config>=0.2.3",
-  "opencv-python>=4.13.0.92",
-  "av>=14.0.0",
+    "pydantic>=2.0",
+    "utilityhub_config>=0.2.3",
+    "opencv-python>=4.13.0.92",
+    "av>=14.0.0",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
 ]
 
 [dependency-groups]
@@ -23,18 +25,18 @@ mlx = ["corridorkey-mlx"]
 
 [tool.uv]
 conflicts = [
-  [
-    { extra = "cuda" },
-    { extra = "mlx" },
-  ],
-  [
-    { extra = "cuda" },
-    { extra = "rocm" },
-  ],
-  [
-    { extra = "rocm" },
-    { extra = "mlx" },
-  ],
+    [
+        { extra = "cuda" },
+        { extra = "mlx" },
+    ],
+    [
+        { extra = "cuda" },
+        { extra = "rocm" },
+    ],
+    [
+        { extra = "rocm" },
+        { extra = "mlx" },
+    ],
 ]
 
 [[tool.uv.index]]
@@ -60,16 +62,16 @@ ck = "corridorkey_new.main:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "gpu: requires CUDA GPU (skipped in CI)",
-  "slow: long-running test",
-  "mlx: requires Apple Silicon with MLX installed",
+    "gpu: requires CUDA GPU (skipped in CI)",
+    "slow: long-running test",
+    "mlx: requires Apple Silicon with MLX installed",
 ]
 
 [tool.coverage.run]
 omit = [
-  "*/corridorkey_new/infra/device_utils.py",
-  "*/corridorkey_new/loader/extractor.py",
-  "*/corridorkey_new/main.py",
+    "*/corridorkey_new/infra/device_utils.py",
+    "*/corridorkey_new/loader/extractor.py",
+    "*/corridorkey_new/main.py",
 ]
 
 [tool.coverage.report]
