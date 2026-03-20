@@ -16,6 +16,8 @@ class ClipManifest(BaseModel):
 
     Attributes:
         clip_name: Clip name, carried through for logging and output naming.
+        clip_root: Absolute path to the clip folder. Parent of Input/, Output/,
+            Frames/, AlphaHint/, etc.
         frames_dir: Directory containing the input frame sequence.
             Points to ``Input/`` for image sequence inputs, or ``Frames/``
             for video inputs (extracted by stage 1).
@@ -33,9 +35,13 @@ class ClipManifest(BaseModel):
             Defaults to ``(0, frame_count)`` — the full sequence.
             Can be narrowed for partial runs or testing.
         is_linear: True if input frames are in linear light (e.g. .exr).
+        video_meta_path: Path to the ``video_meta.json`` sidecar file written
+            by stage 1 during video extraction. None for image sequence inputs.
+            Stage 6 reads this to re-encode output with matching properties.
     """
 
     clip_name: str
+    clip_root: Path
     frames_dir: Path
     alpha_frames_dir: Path | None
     output_dir: Path
@@ -43,6 +49,7 @@ class ClipManifest(BaseModel):
     frame_count: int
     frame_range: tuple[int, int]
     is_linear: bool
+    video_meta_path: Path | None = None
 
     @model_validator(mode="after")
     def validate_frame_range(self) -> ClipManifest:

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from corridorkey_new.entrypoint import Clip
 from corridorkey_new.loader.contracts import ClipManifest
-from corridorkey_new.loader.extractor import extract_video, is_video
+from corridorkey_new.loader.extractor import extract_video, is_video, save_video_metadata
 from corridorkey_new.loader.validator import count_frames, detect_is_linear, validate
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,19 @@ def load(clip: Clip) -> ClipManifest:
 
     frame_count = count_frames(frames_dir)
 
+    # Carry the video metadata path so stage 6 can re-encode with matching
+    # framerate, codec, colour space, etc. None for image sequence inputs.
+    video_meta_path: Path | None = None
+    if is_video(clip.input_path):
+        candidate = clip.root / "video_meta.json"
+        if candidate.exists():
+            video_meta_path = candidate
+        else:
+            logger.warning("Video metadata missing for '%s' — stage 6 will not be able to re-encode.", clip.name)
+
     return ClipManifest(
         clip_name=clip.name,
+        clip_root=clip.root,
         frames_dir=frames_dir,
         alpha_frames_dir=alpha_frames_dir,
         output_dir=output_dir,
@@ -56,6 +67,7 @@ def load(clip: Clip) -> ClipManifest:
         frame_count=frame_count,
         frame_range=(0, frame_count),
         is_linear=detect_is_linear(frames_dir),
+        video_meta_path=video_meta_path,
     )
 
 
@@ -83,7 +95,13 @@ def _resolve_frames(path: Path, extracted_dir_name: str) -> Path:
         logger.info("Frames already extracted, skipping: %s", output_dir)
         return output_dir
 
-    extract_video(path, output_dir)
+    metadata = extract_video(path, output_dir)
+
+    # Only save metadata for the main input video (not alpha video)
+    if extracted_dir_name == "Frames":
+        clip_root = path.parent.parent
+        save_video_metadata(metadata, clip_root)
+
     return output_dir
 
 

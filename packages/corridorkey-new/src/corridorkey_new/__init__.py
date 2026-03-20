@@ -60,16 +60,18 @@ from corridorkey_new.infra import (
     resolve_device,
     setup_logging,
 )
-from corridorkey_new.loader import ClipManifest, load, resolve_alpha
+from corridorkey_new.loader import ClipManifest, VideoMetadata, load, load_video_metadata, resolve_alpha
 
 __all__ = [
     # Pipeline
     "scan",
     "load",
     "resolve_alpha",
+    "load_video_metadata",
     # Contracts
     "Clip",
     "ClipManifest",
+    "VideoMetadata",
     # Startup
     "load_config",
     "setup_logging",

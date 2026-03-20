@@ -11,10 +11,51 @@ from pathlib import Path
 
 import av
 import cv2
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".mxf", ".webm", ".m4v"})
+
+
+class VideoMetadata(BaseModel):
+    """Source video metadata captured at extraction time.
+
+    Carried through the pipeline so stage 6 can re-encode output with
+    matching properties.
+
+    Attributes:
+        filename: Original video filename (stem + suffix).
+        width: Frame width in pixels.
+        height: Frame height in pixels.
+        fps_num: Framerate numerator.
+        fps_den: Framerate denominator.
+        pix_fmt: Pixel format string (e.g. "yuv420p").
+        codec_name: Video codec name (e.g. "h264", "prores").
+        duration_s: Total duration in seconds. None if not reported by container.
+        has_audio: True if the source container has at least one audio stream.
+        color_space: Color space string (e.g. "bt709"). None if not reported.
+        color_transfer: Transfer characteristic (e.g. "bt709"). None if not reported.
+        color_primaries: Color primaries (e.g. "bt709"). None if not reported.
+    """
+
+    filename: str
+    width: int
+    height: int
+    fps_num: int
+    fps_den: int
+    pix_fmt: str
+    codec_name: str
+    duration_s: float | None = None
+    has_audio: bool = False
+    color_space: str | None = None
+    color_transfer: str | None = None
+    color_primaries: str | None = None
+
+    @property
+    def fps(self) -> float:
+        """Framerate as a float."""
+        return self.fps_num / self.fps_den if self.fps_den else 0.0
 
 
 def is_video(path: Path) -> bool:
@@ -22,7 +63,34 @@ def is_video(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
 
 
-def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06d}.png") -> None:
+def read_video_metadata(video_path: Path) -> VideoMetadata:
+    """Read metadata from a video file without extracting frames.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        VideoMetadata populated from the container and video stream.
+
+    Raises:
+        RuntimeError: If the video cannot be opened.
+    """
+    try:
+        container = av.open(str(video_path))
+    except av.FFmpegError as e:
+        raise RuntimeError(f"Cannot open video '{video_path}': {e}") from e
+
+    try:
+        return _extract_metadata(container, video_path)
+    finally:
+        container.close()
+
+
+def extract_video(
+    video_path: Path,
+    output_dir: Path,
+    pattern: str = "frame_{:06d}.png",
+) -> VideoMetadata:
     """Extract a video file to a PNG image sequence using PyAV.
 
     Frames are written as lossless PNGs. The output filenames follow
@@ -33,6 +101,9 @@ def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06
         output_dir: Directory to write frames into (created if needed).
         pattern: Python format string for frame filenames. Must contain one
             integer placeholder (e.g. ``"frame_{:06d}.png"``).
+
+    Returns:
+        VideoMetadata captured from the source container.
 
     Raises:
         RuntimeError: If the video cannot be opened or a frame cannot be decoded.
@@ -49,6 +120,8 @@ def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06
     stream = container.streams.video[0]
     stream.codec_context.thread_type = av.codec.context.ThreadType.AUTO
 
+    metadata = _extract_metadata(container, video_path)
+
     frame_index = 0
     try:
         for packet in container.demux(stream):
@@ -64,3 +137,69 @@ def extract_video(video_path: Path, output_dir: Path, pattern: str = "frame_{:06
         container.close()
 
     logger.info("Extracted %d frames to %s", frame_index, output_dir)
+    return metadata
+
+
+def save_video_metadata(metadata: VideoMetadata, clip_root: Path) -> Path:
+    """Write VideoMetadata as JSON into the clip root directory.
+
+    Args:
+        metadata: Metadata to serialise.
+        clip_root: Clip root directory (the folder containing Input/, Output/, etc.).
+
+    Returns:
+        Path to the written JSON file.
+    """
+    out_path = clip_root / "video_meta.json"
+    out_path.write_text(metadata.model_dump_json(indent=2), encoding="utf-8")
+    logger.info("Saved video metadata: %s", out_path)
+    return out_path
+
+
+def load_video_metadata(clip_root: Path) -> VideoMetadata | None:
+    """Read VideoMetadata from the clip root directory, if present.
+
+    Args:
+        clip_root: Clip root directory.
+
+    Returns:
+        VideoMetadata if video_meta.json exists, None otherwise.
+    """
+    meta_path = clip_root / "video_meta.json"
+    if not meta_path.exists():
+        return None
+    return VideoMetadata.model_validate_json(meta_path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_metadata(container: av.container.InputContainer, video_path: Path) -> VideoMetadata:
+    """Pull metadata from an open PyAV container."""
+    stream = container.streams.video[0]
+    ctx = stream.codec_context
+
+    rate = stream.average_rate or stream.base_rate or stream.guessed_rate
+    fps_num = int(rate.numerator) if rate else 0
+    fps_den = int(rate.denominator) if rate else 1
+
+    duration_s: float | None = None
+    if container.duration is not None:
+        duration_s = float(container.duration) / av.time_base
+
+    return VideoMetadata(
+        filename=video_path.name,
+        width=ctx.width,
+        height=ctx.height,
+        fps_num=fps_num,
+        fps_den=fps_den,
+        pix_fmt=ctx.pix_fmt or "unknown",
+        codec_name=ctx.name or "unknown",
+        duration_s=duration_s,
+        has_audio=len(container.streams.audio) > 0,
+        color_space=str(ctx.colorspace) if ctx.colorspace else None,
+        color_transfer=str(ctx.color_trc) if ctx.color_trc else None,
+        color_primaries=str(ctx.color_primaries) if ctx.color_primaries else None,
+    )
