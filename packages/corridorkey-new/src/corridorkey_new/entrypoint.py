@@ -3,40 +3,53 @@
 Accepts a path from the external interface (CLI, GUI, or API) and produces
 a list of Clip objects ready for stage 1 to consume.
 
-This is the only place that touches the filesystem for discovery purposes.
+This is the only place that touches the filesystem for discovery purposes,
+and the only place that reorganises the user's files (video normalisation).
 """
 
 from __future__ import annotations
 
+import logging
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, field_validator, model_validator
 
+logger = logging.getLogger(__name__)
+
+VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".mxf", ".webm", ".m4v"})
+
 
 def scan(path: str | Path) -> list[Clip]:
-    """Scan a directory for processable clips.
+    """Scan a path for processable clips.
 
-    Accepts either:
+    Accepts:
     - A clips directory containing multiple clip subfolders
-    - A single clip folder directly (must contain Input/Frames and AlphaHint)
+    - A single clip folder (must contain Input/ and optionally AlphaHint/)
+    - A single video file (reorganised in-place into a clip folder structure)
 
     Args:
-        path: Path to a clips directory or a single clip folder.
+        path: Path to a clips directory, a single clip folder, or a video file.
 
     Returns:
-        List of Clip objects in READY state.
+        List of Clip objects ready for stage 1.
 
     Raises:
-        ValueError: If the path does not exist or is not a directory.
+        ValueError: If the path does not exist.
     """
     path = Path(path)
 
     if not path.exists():
         raise ValueError(f"Path does not exist: {path}")
-    if not path.is_dir():
-        raise ValueError(f"Path is not a directory: {path}")
 
-    # If the path itself looks like a clip, treat it as a single clip.
+    # Single video file - reorganise into a clip folder structure.
+    if path.is_file():
+        if path.suffix.lower() not in VIDEO_EXTENSIONS:
+            raise ValueError(f"File is not a recognised video format: {path}")
+        clip = _normalise_video(path)
+        return [clip]
+
+    # If the directory itself looks like a clip, treat it as one.
     clip = _try_build_clip(path)
     if clip is not None:
         return [clip]
@@ -44,6 +57,11 @@ def scan(path: str | Path) -> list[Clip]:
     # Otherwise scan subdirectories for clips.
     clips = []
     for item in sorted(path.iterdir()):
+        if item.is_file() and item.suffix.lower() in VIDEO_EXTENSIONS:
+            # Loose video file inside a clips dir - normalise it.
+            clip = _normalise_video(item)
+            clips.append(clip)
+            continue
         if not item.is_dir():
             continue
         clip = _try_build_clip(item)
@@ -53,13 +71,50 @@ def scan(path: str | Path) -> list[Clip]:
     return clips
 
 
+def _normalise_video(video_path: Path) -> Clip:
+    """Reorganise a loose video file into a clip folder structure in-place.
+
+    Given ``parent/random_name.mp4``, produces:
+        parent/
+          Input/
+            random_name.mp4   <- moved here
+          AlphaHint/          <- created empty
+
+    If ``Input/`` already exists, the video is not moved again.
+
+    Args:
+        video_path: Absolute path to the video file.
+
+    Returns:
+        Clip with root=parent, input_path=parent/Input/video, alpha_path=None.
+    """
+    clip_root = video_path.parent
+    input_dir = clip_root / "Input"
+    alpha_dir = clip_root / "AlphaHint"
+
+    input_dir.mkdir(exist_ok=True)
+    alpha_dir.mkdir(exist_ok=True)
+
+    dest = input_dir / video_path.name
+    if not dest.exists():
+        shutil.move(str(video_path), str(dest))
+        logger.info("Moved video '%s' -> '%s'", video_path, dest)
+
+    return Clip(
+        name=clip_root.name,
+        root=clip_root,
+        input_path=dest,
+        alpha_path=None,
+    )
+
+
 def _try_build_clip(clip_dir: Path) -> Clip | None:
     """Attempt to build a Clip from a directory. Returns None if not a valid clip."""
     input_path = _find_input(clip_dir)
-    alpha_path = _find_alpha(clip_dir)
-
-    if input_path is None or alpha_path is None:
+    if input_path is None:
         return None
+
+    alpha_path = _find_alpha(clip_dir)  # None if absent - stage 2 will generate it
 
     return Clip(
         name=clip_dir.name,
@@ -70,18 +125,13 @@ def _try_build_clip(clip_dir: Path) -> Clip | None:
 
 
 def _find_input(clip_dir: Path) -> Path | None:
-    """Locate the input asset (Frames/ sequence or Source/ video) inside a clip folder."""
-    for name in ("Frames", "Source", "Input"):
-        candidate = _find_icase(clip_dir, name)
-        if candidate is not None:
-            return candidate
-    return None
+    """Locate the Input/ directory inside a clip folder (case-insensitive)."""
+    return _find_icase(clip_dir, "Input")
 
 
 def _find_alpha(clip_dir: Path) -> Path | None:
-    """Locate the alpha hint asset (AlphaHint/ sequence or video) inside a clip folder."""
-    candidate = _find_icase(clip_dir, "AlphaHint")
-    return candidate
+    """Locate the alpha hint asset inside a clip folder."""
+    return _find_icase(clip_dir, "AlphaHint")
 
 
 def _find_icase(parent: Path, name: str) -> Path | None:
@@ -93,24 +143,24 @@ def _find_icase(parent: Path, name: str) -> Path | None:
 
 
 class Clip(BaseModel):
-    """A clip ready for processing. Output contract of stage 0.
+    """A clip ready for stage 1. Output contract of stage 0.
 
     Attributes:
         name: Human-readable clip name derived from the folder name.
         root: Absolute path to the clip folder.
         input_path: Path to the input asset (image sequence dir or video file).
-        alpha_path: Path to the alpha hint asset (image sequence dir or video file).
+        alpha_path: Path to the alpha hint asset. None if absent (stage 2 required).
     """
 
     name: str
     root: Path
     input_path: Path
-    alpha_path: Path
+    alpha_path: Path | None
 
     @field_validator("root", "input_path", "alpha_path")
     @classmethod
-    def must_exist(cls, v: Path) -> Path:
-        if not v.exists():
+    def must_exist(cls, v: Path | None) -> Path | None:
+        if v is not None and not v.exists():
             raise ValueError(f"Path does not exist: {v}")
         return v
 
