@@ -250,6 +250,16 @@ dependencies = [
 name = "corridorkey-new"
 version = "0.1.0"
 source = { editable = "packages/corridorkey-new" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "utilityhub-config" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "utilityhub-config", specifier = ">=0.2.3" },
+]
 
 [[package]]
 name = "corridorkey-workspace"
