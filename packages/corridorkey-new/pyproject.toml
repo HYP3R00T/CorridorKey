@@ -1,0 +1,17 @@
+[project]
+name = "corridorkey-new"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Rajesh Das", email = "hyperoot.tech@proton.me" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+corridorkey-new = "corridorkey_new:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
