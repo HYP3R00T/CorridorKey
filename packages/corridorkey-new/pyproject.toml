@@ -3,9 +3,53 @@ name = "corridorkey-new"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
+authors = [{ name = "Corridor Digital" }]
+maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
-dependencies = ["pydantic>=2.0", "utilityhub_config>=0.2.3"]
+dependencies = [
+  "pydantic>=2.0",
+  "utilityhub_config>=0.2.3",
+  "opencv-python>=4.13.0.92",
+  "av>=14.0.0",
+]
+
+[project.optional-dependencies]
+cuda = ["torch==2.10.0", "torchvision==0.25.0"]
+rocm = []
+mlx = ["corridorkey-mlx"]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cuda" },
+    { extra = "mlx" },
+  ],
+  [
+    { extra = "cuda" },
+    { extra = "rocm" },
+  ],
+  [
+    { extra = "rocm" },
+    { extra = "mlx" },
+  ],
+]
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+extra = "cuda"
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.1"
+explicit = true
+extra = "rocm"
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cuda", extra = "cuda" }]
+torchvision = [{ index = "pytorch-cuda", extra = "cuda" }]
+corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git", extra = "mlx" }
 
 [project.scripts]
 ck = "corridorkey_new.main:main"

@@ -10,8 +10,9 @@ maintainers = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 dependencies = []
 
 [project.optional-dependencies]
-cuda = ["corridorkey-core[cuda]"]
-mlx = ["corridorkey-core[mlx]"]
+cuda = ["corridorkey-new[cuda]"]
+mlx = ["corridorkey-new[mlx]"]
+rocm = ["corridorkey-new[rocm] ; sys_platform == 'linux'"]
 
 [dependency-groups]
 dev = [
@@ -51,6 +52,22 @@ fail_under = 75
 
 [tool.uv.workspace]
 members = ["packages/*"]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cuda" },
+    { extra = "mlx" },
+  ],
+  [
+    { extra = "cuda" },
+    { extra = "rocm" },
+  ],
+  [
+    { extra = "rocm" },
+    { extra = "mlx" },
+  ],
+]
 
 [tool.uv.sources]
 corridorkey-core = { workspace = true }
