@@ -28,7 +28,7 @@ class TestCorridorKeyConfigValidation:
 
     def test_invalid_log_level_raises(self):
         with pytest.raises(Exception, match="log_level"):
-            CorridorKeyConfig(log_level="VERBOSE")
+            CorridorKeyConfig(log_level="VERBOSE")  # type: ignore[arg-type]
 
     def test_valid_devices(self):
         for device in ("auto", "cuda", "rocm", "mps", "cpu"):
@@ -37,7 +37,7 @@ class TestCorridorKeyConfigValidation:
 
     def test_invalid_device_raises(self):
         with pytest.raises(Exception, match="device"):
-            CorridorKeyConfig(device="tpu")
+            CorridorKeyConfig(device="tpu")  # type: ignore[arg-type]
 
 
 class TestCorridorKeyConfigOverrides:

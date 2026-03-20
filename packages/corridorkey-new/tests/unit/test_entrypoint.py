@@ -103,6 +103,31 @@ class TestScan:
         clips = scan(tmp_path, reorganise=False)
         assert clips == []
 
+    def test_video_inside_input_dir_used_as_input_path(self, tmp_path: Path):
+        """A video file inside Input/ should be set as input_path, not the dir."""
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        video = input_dir / "clip.mp4"
+        video.touch()
+        clips = scan(tmp_path)
+        assert len(clips) == 1
+        assert clips[0].input_path == video
+
+    def test_video_inside_alphahint_dir_used_as_alpha_path(self, tmp_path: Path):
+        """A video file inside AlphaHint/ should be set as alpha_path, not the dir."""
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        alpha_dir = clip_dir / "AlphaHint"
+        input_dir.mkdir(parents=True)
+        alpha_dir.mkdir(parents=True)
+        (input_dir / "frame.png").touch()
+        video = alpha_dir / "alpha.mp4"
+        video.touch()
+        clips = scan(tmp_path)
+        assert len(clips) == 1
+        assert clips[0].alpha_path == video
+
 
 class TestClip:
     def test_valid_clip_without_alpha(self, tmp_path: Path):
