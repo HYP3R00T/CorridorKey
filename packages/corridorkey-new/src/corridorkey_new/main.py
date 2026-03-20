@@ -14,7 +14,7 @@ def main() -> None:
     setup_logging(config)
 
     gpu = detect_gpu()
-    print(f"Device: {gpu}")
+    print(f"Device: {gpu.vendor} ({gpu.backend})")
 
     clips = scan(CLIPS_DIR)
     print(f"Found {len(clips)} clip(s)")

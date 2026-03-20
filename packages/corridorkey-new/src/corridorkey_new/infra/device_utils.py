@@ -38,15 +38,6 @@ class GPUInfo:
         """PyTorch device string to pass to torch.device()."""
         return self.backend.lower() if self.backend != "ROCm" else "cuda"
 
-    def __str__(self) -> str:
-        if not self.devices:
-            return f"{self.vendor} ({self.backend})"
-        names = ", ".join(self.devices)
-        if self.vram_gb:
-            vram = ", ".join(f"{v:.1f}GB" for v in self.vram_gb)
-            return f"{self.vendor} ({self.backend}) — {names} [{vram} VRAM]"
-        return f"{self.vendor} ({self.backend}) — {names}"
-
 
 def detect_gpu() -> GPUInfo:
     """Probe the system for available GPU hardware.
