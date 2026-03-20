@@ -57,6 +57,19 @@ class CorridorKeyConfig(BaseModel):
         ),
     ] = "INFO"
 
+    device: Annotated[
+        Literal["auto", "cuda", "rocm", "mps", "cpu"],
+        Field(
+            default="auto",
+            description=(
+                "Compute device for inference. "
+                "'auto' detects the best available device at runtime (ROCm > CUDA > MPS > CPU). "
+                "'cuda' forces NVIDIA GPU. 'rocm' forces AMD GPU. "
+                "'mps' forces Apple Silicon. 'cpu' forces CPU."
+            ),
+        ),
+    ] = "auto"
+
     @classmethod
     def _expand_paths(cls, v: Path | str) -> Path:
         return expand_path(str(v) if isinstance(v, Path) else v)
