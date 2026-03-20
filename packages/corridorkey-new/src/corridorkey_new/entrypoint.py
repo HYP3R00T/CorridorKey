@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel, field_validator, model_validator
+
 
 def scan(path: str | Path) -> list[Clip]:
     """Scan a directory for processable clips.
@@ -90,7 +92,7 @@ def _find_icase(parent: Path, name: str) -> Path | None:
     return None
 
 
-class Clip:
+class Clip(BaseModel):
     """A clip ready for processing. Output contract of stage 0.
 
     Attributes:
@@ -100,11 +102,23 @@ class Clip:
         alpha_path: Path to the alpha hint asset (image sequence dir or video file).
     """
 
-    def __init__(self, name: str, root: Path, input_path: Path, alpha_path: Path) -> None:
-        self.name = name
-        self.root = root
-        self.input_path = input_path
-        self.alpha_path = alpha_path
+    name: str
+    root: Path
+    input_path: Path
+    alpha_path: Path
+
+    @field_validator("root", "input_path", "alpha_path")
+    @classmethod
+    def must_exist(cls, v: Path) -> Path:
+        if not v.exists():
+            raise ValueError(f"Path does not exist: {v}")
+        return v
+
+    @model_validator(mode="after")
+    def root_must_be_directory(self) -> Clip:
+        if not self.root.is_dir():
+            raise ValueError(f"Clip root is not a directory: {self.root}")
+        return self
 
     def __repr__(self) -> str:
         return f"Clip(name={self.name!r}, input={self.input_path}, alpha={self.alpha_path})"
