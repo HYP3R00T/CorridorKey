@@ -139,10 +139,12 @@ class TestBridgeMethods:
         pc = cfg.to_preprocess_config()
         assert pc.img_size == 512
 
-    def test_to_inference_config_raises_without_checkpoint(self):
+    def test_to_inference_config_defaults_to_standard_path(self):
+        from corridorkey_new.infra.model_hub import default_checkpoint_path
+
         cfg = CorridorKeyConfig(device="cpu")
-        with pytest.raises(ValueError, match="checkpoint_path"):
-            cfg.to_inference_config()
+        ic = cfg.to_inference_config()
+        assert ic.checkpoint_path == default_checkpoint_path()
 
     def test_to_inference_config_basic(self, tmp_path):
         import torch

@@ -22,6 +22,8 @@ import logging
 import threading
 from dataclasses import dataclass, field
 
+import torch.nn as nn
+
 from corridorkey_new.inference import InferenceConfig
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.pipeline.queue import BoundedQueue
@@ -51,6 +53,7 @@ class PipelineConfig:
 
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
     inference: InferenceConfig | None = None
+    model: nn.Module | None = None  # pre-loaded model; if None, runner loads it from inference.checkpoint_path
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
     write: WriteConfig | None = None
     input_queue_depth: int = 2
@@ -91,11 +94,27 @@ class PipelineRunner:
             config=cfg.preprocess,
             output_queue=input_queue,
         )
+        if cfg.inference is None:
+            raise ValueError(
+                "PipelineConfig.inference is not set. "
+                "Build an InferenceConfig and pass it to PipelineConfig, "
+                "or call load_model() and pass the model to PipelineRunner."
+            )
+        inference_cfg: InferenceConfig = cfg.inference
+
+        if cfg.model is None:
+            from corridorkey_new.inference import load_model
+
+            logger.info("pipeline_runner: loading model from %s", inference_cfg.checkpoint_path)
+            loaded_model = load_model(inference_cfg)
+        else:
+            loaded_model = cfg.model
+
         inference_worker = InferenceWorker(
             input_queue=input_queue,
             output_queue=output_queue,
-            model=None,  # type: ignore[arg-type]  # replaced when model is loaded
-            config=cfg.inference or InferenceConfig(checkpoint_path=manifest.output_dir),  # placeholder
+            model=loaded_model,
+            config=inference_cfg,
         )
         postwrite_worker = PostWriteWorker(
             input_queue=output_queue,

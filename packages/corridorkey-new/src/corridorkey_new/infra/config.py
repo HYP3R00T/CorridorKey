@@ -83,7 +83,11 @@ class InferenceSettings(BaseModel):
         Path | None,
         Field(
             default=None,
-            description="Path to the .pth model checkpoint file. Required to run inference.",
+            description=(
+                "Path to the .pth model checkpoint file. "
+                "Defaults to ~/.config/corridorkey/models/CorridorKey_v1.0.pth. "
+                "The model is downloaded automatically on first run if not present."
+            ),
         ),
     ] = None
 
@@ -220,11 +224,9 @@ class CorridorKeyConfig(BaseModel):
         import torch
 
         from corridorkey_new.inference import InferenceConfig
+        from corridorkey_new.infra.model_hub import default_checkpoint_path
 
-        if self.inference.checkpoint_path is None:
-            raise ValueError(
-                "inference.checkpoint_path is not set. Add it to corridorkey.toml or set CK_INFERENCE__CHECKPOINT_PATH."
-            )
+        checkpoint = self.inference.checkpoint_path or default_checkpoint_path()
 
         _precision_map = {
             "float32": torch.float32,
@@ -232,7 +234,7 @@ class CorridorKeyConfig(BaseModel):
         }
 
         return InferenceConfig(
-            checkpoint_path=self.inference.checkpoint_path,
+            checkpoint_path=checkpoint,
             device=device or self.device,
             img_size=self.preprocess.img_size,
             use_refiner=self.inference.use_refiner,

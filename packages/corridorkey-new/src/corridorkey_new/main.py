@@ -9,20 +9,15 @@ from corridorkey_new import (
     scan,
     setup_logging,
 )
+from corridorkey_new.inference import load_model
+from corridorkey_new.infra.model_hub import ensure_model
 from corridorkey_new.pipeline import PipelineConfig, PipelineRunner
-from corridorkey_new.preprocessor import PreprocessConfig
 
 CLIPS_DIR = Path(r"C:\Users\Rajes\Downloads\Samples\sample_inputs_mod")
 
 
 def _generate_alpha_externally(manifest) -> Path:
-    """Stub: simulate external alpha generation.
-
-    In a real CLI/GUI this would invoke the alpha generator tool, wait for it
-    to finish, and return the path to the generated alpha frames directory.
-
-    For now, prompt the user to provide the path manually.
-    """
+    """Stub: simulate external alpha generation."""
     print(f"  Alpha required for '{manifest.clip_name}'.")
     print(f"  Run your alpha generator on: {manifest.frames_dir}")
     raw = input("  Enter path to generated alpha frames directory: ").strip()
@@ -37,7 +32,6 @@ def main() -> None:
     print(gpu.model_dump_json(indent=2))
 
     clips = scan(CLIPS_DIR)
-
     manifest = load(clips[0])
     print(manifest.model_dump_json(indent=2))
 
@@ -47,12 +41,21 @@ def main() -> None:
         print(f"alpha resolved: {manifest.alpha_frames_dir}")
 
     device = resolve_device(config.device)
+    inference_config = config.to_inference_config(device=device)
+
+    # Download the model if it's not already on disk.
+    ensure_model(dest_dir=inference_config.checkpoint_path.parent)
+
+    print(f"\nLoading model from {inference_config.checkpoint_path} ...")
+    model = load_model(inference_config)
+    print("Model loaded.")
+
     pipeline_config = PipelineConfig(
-        preprocess=PreprocessConfig(img_size=2048, device=device),
-        input_queue_depth=2,
-        output_queue_depth=2,
+        preprocess=config.to_preprocess_config(device=device),
+        inference=inference_config,
+        model=model,
     )
 
     print(f"\nRunning pipeline for '{manifest.clip_name}' ({manifest.frame_count} frames)...")
     PipelineRunner(manifest, pipeline_config).run()
-    print("Done.")
+    print(f"Done. Output written to: {manifest.output_dir}")
