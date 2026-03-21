@@ -31,7 +31,6 @@ _ENGINE_PRESET_ALIASES: dict[str, str] = {
     "man": "manual",
 }
 
-# (optimization_mode, model_precision, img_size)
 _PRESETS: dict[str, tuple[str, str, int]] = {
     "speed": ("speed", "float16", 1024),
     "balanced": ("auto", "auto", 1536),
@@ -47,14 +46,16 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 
-app.command("init")(init)
-app.command("config")(config)
-app.command("reset")(reset)
-
 
 @app.callback(invoke_without_command=True)
-def run(
-    ctx: typer.Context,
+def _default(ctx: typer.Context) -> None:
+    """Fall back to the wizard when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        wizard()
+
+
+@app.command()
+def wizard(
     clips_dir: Annotated[
         Path | None,
         typer.Argument(help="Directory containing clips to process."),
@@ -64,10 +65,7 @@ def run(
         typer.Option("--yes", "-y", help="Skip prompts and use config defaults."),
     ] = False,
 ) -> None:
-    """Process clips in CLIPS_DIR. Prompts interactively if omitted."""
-    if ctx.invoked_subcommand is not None:
-        return
-
+    """Scan, configure, and process clips. The default command."""
     from corridorkey_new import load, load_config, resolve_alpha, resolve_device, scan, setup_logging
     from corridorkey_new.inference import load_model
     from corridorkey_new.infra import ensure_config_file
@@ -99,7 +97,6 @@ def run(
 
     _print_clip_table(clips, clips_dir)
 
-    # Engine settings
     if yes:
         opt_mode = config_obj.inference.optimization_mode
         precision = config_obj.inference.model_precision
@@ -157,6 +154,11 @@ def run(
         console.print(f"[green]Done.[/green] Output: [cyan]{manifest.output_dir}[/cyan]\n")
 
     console.print("[bold green]All clips complete.[/bold green]")
+
+
+app.command("init")(init)
+app.command("config")(config)
+app.command("reset")(reset)
 
 
 def main() -> None:
