@@ -35,7 +35,7 @@ markers = [
     "slow: long-running test",
     "mlx: requires Apple Silicon with MLX installed",
 ]
-addopts = "--tb=short"
+addopts = "--tb=short --import-mode=importlib"
 
 [tool.coverage.run]
 omit = [

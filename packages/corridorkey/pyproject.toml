@@ -45,12 +45,12 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-tb=short"
 markers = [
     "gpu: requires CUDA GPU (skipped in CI)",
     "slow: long-running test",
     "mlx: requires Apple Silicon with MLX installed",
 ]
-addopts = "-tb=short"
 
 [tool.coverage.run]
 source = ["corridorkey"]
