@@ -26,6 +26,7 @@ conflicts = [[
 
 [manifest]
 members = [
+    "ckcli",
     "corridorkey",
     "corridorkey-cli",
     "corridorkey-core",
@@ -111,6 +112,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/0f/57072b253af40c8aa6636e6de7d75985624c1eb392815b2f934199340a89/charset_normalizer-3.4.5-cp313-cp313-win_amd64.whl", hash = "sha256:e37bd100d2c5d3ba35db9c7c5ba5a9228cbcffe5c4778dc824b164e5257813d7", size = 142630, upload-time = "2026-03-06T06:01:59.062Z" },
     { url = "https://files.pythonhosted.org/packages/31/41/1c4b7cc9f13bd9d369ce3bc993e13d374ce25fa38a2663644283ecf422c1/charset_normalizer-3.4.5-cp313-cp313-win_arm64.whl", hash = "sha256:93b3b2cc5cf1b8743660ce77a4f45f3f6d1172068207c1defc779a36eea6bb36", size = 133254, upload-time = "2026-03-06T06:02:00.281Z" },
     { url = "https://files.pythonhosted.org/packages/c5/60/3a621758945513adfd4db86827a5bafcc615f913dbd0b4c2ed64a65731be/charset_normalizer-3.4.5-py3-none-any.whl", hash = "sha256:9db5e3fcdcee89a78c04dffb3fe33c79f77bd741a624946db2591c81b2fc85b0", size = 55455, upload-time = "2026-03-06T06:03:17.827Z" },
+]
+
+[[package]]
+name = "ckcli"
+version = "0.1.0"
+source = { editable = "packages/ckcli" }
+dependencies = [
+    { name = "corridorkey-new" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "corridorkey-new", editable = "packages/corridorkey-new" },
+    { name = "rich", specifier = ">=13" },
+    { name = "typer", specifier = ">=0.12" },
 ]
 
 [[package]]
@@ -350,6 +368,7 @@ rocm = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ckcli" },
     { name = "corridorkey-cli" },
     { name = "corridorkey-new" },
     { name = "git-cliff" },
@@ -376,6 +395,7 @@ provides-extras = ["cuda", "mlx", "rocm"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ckcli", editable = "packages/ckcli" },
     { name = "corridorkey-cli", editable = "packages/corridorkey-cli" },
     { name = "corridorkey-new", editable = "packages/corridorkey-new" },
     { name = "git-cliff", specifier = ">=2.12.0" },

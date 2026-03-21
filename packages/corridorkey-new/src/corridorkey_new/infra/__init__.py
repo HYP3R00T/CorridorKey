@@ -28,12 +28,21 @@ GPUInfo
     Dataclass describing the detected GPU backend, vendor, and VRAM.
 """
 
-from corridorkey_new.infra.config import CorridorKeyConfig, InferenceSettings, PreprocessSettings, load_config
+from corridorkey_new.infra.config import (
+    CorridorKeyConfig,
+    InferenceSettings,
+    PreprocessSettings,
+    ensure_config_file,
+    export_config,
+    load_config,
+)
 from corridorkey_new.infra.device_utils import GPUInfo, detect_gpu, resolve_device
 from corridorkey_new.infra.logging import setup_logging
 
 __all__ = [
     "load_config",
+    "export_config",
+    "ensure_config_file",
     "setup_logging",
     "resolve_device",
     "detect_gpu",

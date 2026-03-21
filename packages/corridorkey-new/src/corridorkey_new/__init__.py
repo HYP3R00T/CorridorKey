@@ -84,6 +84,8 @@ from corridorkey_new.infra import (
     InferenceSettings,
     PreprocessSettings,
     detect_gpu,
+    ensure_config_file,
+    export_config,
     load_config,
     resolve_device,
     setup_logging,
@@ -118,6 +120,8 @@ __all__ = [
     "FrameReadError",
     # Startup
     "load_config",
+    "export_config",
+    "ensure_config_file",
     "setup_logging",
     "resolve_device",
     "detect_gpu",

@@ -56,9 +56,6 @@ torch = [{ index = "pytorch-cuda", extra = "cuda" }]
 torchvision = [{ index = "pytorch-cuda", extra = "cuda" }]
 corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git", extra = "mlx" }
 
-[project.scripts]
-ck = "corridorkey_new.main:main"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

@@ -16,6 +16,7 @@ rocm = ["corridorkey-new[rocm] ; sys_platform == 'linux'"]
 
 [dependency-groups]
 dev = [
+    "ckcli>=0.1.0",
     "corridorkey-cli>=0.1.0",
     "corridorkey-new>=0.1.0",
     "git-cliff>=2.12.0",
@@ -74,3 +75,4 @@ corridorkey-core = { workspace = true }
 corridorkey = { workspace = true }
 corridorkey-cli = { workspace = true }
 corridorkey-new = { workspace = true }
+ckcli = { workspace = true }
