@@ -53,19 +53,32 @@ def run_inference(
     tile_refiner = _should_tile_refiner(config)
     device_type = torch.device(config.device).type
 
+    # Use the model's actual precision for autocast — bf16 on Ampere+/MPS,
+    # fp16 on older GPUs. Hardcoding fp16 would silently downcast bf16 models.
+    autocast_dtype = config.model_precision if config.model_precision != torch.float32 else torch.float16
+
     hook_handle = None
     if tile_refiner:
         refiner = getattr(model, "refiner", None)
         if refiner is not None:
             hook_fn = _make_tiled_refiner_hook(model, config)
             hook_handle = refiner.register_forward_hook(hook_fn)
+    elif config.refiner_scale != 1.0:
+        refiner = getattr(model, "refiner", None)
+        if refiner is not None:
+            scale = config.refiner_scale
+
+            def _scale_hook(module: nn.Module, inputs: tuple, output: torch.Tensor) -> torch.Tensor:
+                return output * scale
+
+            hook_handle = refiner.register_forward_hook(_scale_hook)
 
     try:
         with (
             torch.inference_mode(),
             torch.autocast(
                 device_type=device_type,
-                dtype=torch.float16,
+                dtype=autocast_dtype,
                 enabled=config.mixed_precision and device_type != "cpu",
             ),
         ):
@@ -81,6 +94,25 @@ def run_inference(
         fg=output["fg"],
         meta=frame.meta,
     )
+
+
+def _free_vram_if_needed(device: str) -> None:
+    """Release cached VRAM allocations on low-memory devices.
+
+    On GPUs with <6 GB VRAM, PyTorch's caching allocator can hold onto
+    freed blocks and cause OOM on the next frame. Calling empty_cache()
+    after each frame keeps peak usage flat at the cost of a small sync.
+    Only called when VRAM < 6 GB to avoid the sync overhead on larger GPUs.
+    """
+    dev = torch.device(device)
+    if dev.type != "cuda":
+        return
+    try:
+        vram_gb = torch.cuda.get_device_properties(dev).total_memory / (1024**3)
+        if vram_gb < 6.0:
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

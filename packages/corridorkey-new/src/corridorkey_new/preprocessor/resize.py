@@ -56,8 +56,17 @@ def _squish(
     alpha: np.ndarray,
     img_size: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Stretch both arrays to img_size × img_size regardless of aspect ratio."""
-    image_out = cv2.resize(image, (img_size, img_size), interpolation=cv2.INTER_LINEAR)
+    """Stretch both arrays to img_size × img_size regardless of aspect ratio.
+
+    Uses INTER_AREA when downscaling (anti-aliased, preserves detail) and
+    INTER_LINEAR when upscaling. This matches the old engine's behaviour and
+    avoids the aliasing artefacts that INTER_LINEAR produces on downscale.
+    """
+    src_h, src_w = image.shape[:2]
+    downscaling = (src_h > img_size) or (src_w > img_size)
+    interp = cv2.INTER_AREA if downscaling else cv2.INTER_LINEAR
+
+    image_out = cv2.resize(image, (img_size, img_size), interpolation=interp)
     # cv2.resize drops the channel dim on single-channel arrays — restore it.
-    alpha_out = cv2.resize(alpha[:, :, 0], (img_size, img_size), interpolation=cv2.INTER_LINEAR)
+    alpha_out = cv2.resize(alpha[:, :, 0], (img_size, img_size), interpolation=interp)
     return image_out, alpha_out[:, :, np.newaxis]

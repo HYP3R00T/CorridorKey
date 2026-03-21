@@ -11,6 +11,7 @@ def _make_frame(h: int = 32, w: int = 32) -> PostprocessedFrame:
     return PostprocessedFrame(
         alpha=np.zeros((h, w, 1), dtype=np.float32),
         fg=np.zeros((h, w, 3), dtype=np.float32),
+        processed=np.zeros((h, w, 4), dtype=np.float32),
         comp=np.zeros((h, w, 3), dtype=np.float32),
         frame_index=0,
         source_h=h,
@@ -36,6 +37,7 @@ class TestPostprocessedFrame:
         f = PostprocessedFrame(
             alpha=np.zeros((4, 4, 1), dtype=np.float32),
             fg=np.zeros((4, 4, 3), dtype=np.float32),
+            processed=np.zeros((4, 4, 4), dtype=np.float32),
             comp=np.zeros((4, 4, 3), dtype=np.float32),
             frame_index=5,
             source_h=4,

@@ -48,14 +48,16 @@ class PreprocessSettings(BaseModel):
     img_size: Annotated[
         int,
         Field(
-            default=2048,
-            ge=64,
+            default=0,
+            ge=0,
             description=(
                 "Square resolution the model runs at. "
-                "2048 is the native training resolution — do not change unless retraining."
+                "0 (default) = auto-select based on available VRAM: "
+                "<6 GB → 1024, 6-12 GB → 1536, 12+ GB → 2048 (native training resolution). "
+                "Set explicitly to override (e.g. 2048 for maximum quality regardless of VRAM)."
             ),
         ),
-    ] = 2048
+    ] = 0
 
     resize_strategy: Annotated[
         Literal["squish", "letterbox"],
@@ -111,14 +113,16 @@ class InferenceSettings(BaseModel):
     ] = True
 
     model_precision: Annotated[
-        Literal["float32", "float16"],
+        Literal["auto", "float32", "float16", "bfloat16"],
         Field(
-            default="float32",
+            default="auto",
             description=(
-                "Weight dtype. 'float32' is safe everywhere; 'float16' saves VRAM on CUDA but may reduce accuracy."
+                "Weight dtype for the model forward pass. "
+                "'auto' selects bfloat16 on Ampere+/Apple Silicon, float16 on older GPUs, float32 on CPU. "
+                "'float32' is the safe choice for debugging or maximum numerical stability."
             ),
         ),
-    ] = "float32"
+    ] = "auto"
 
     optimization_mode: Annotated[
         Literal["auto", "speed", "lowvram"],
@@ -131,6 +135,20 @@ class InferenceSettings(BaseModel):
             ),
         ),
     ] = "auto"
+
+    refiner_scale: Annotated[
+        float,
+        Field(
+            default=1.0,
+            ge=0.0,
+            le=1.0,
+            description=(
+                "Scale factor for the CNN edge refiner's delta corrections. "
+                "1.0 applies full refinement. 0.0 skips the refiner output entirely. "
+                "Reducing toward 0.0 speeds up processing at the cost of edge quality."
+            ),
+        ),
+    ] = 1.0
 
 
 class CorridorKeyConfig(BaseModel):
@@ -191,20 +209,26 @@ class CorridorKeyConfig(BaseModel):
     def _expand_paths(cls, v: Path | str) -> Path:
         return expand_path(str(v) if isinstance(v, Path) else v)
 
-    def to_preprocess_config(self, device: str | None = None):  # -> PreprocessConfig
+    def to_preprocess_config(
+        self, device: str | None = None, resolved_img_size: int | None = None
+    ):  # -> PreprocessConfig
         """Build a :class:`~corridorkey_new.preprocessor.PreprocessConfig` from this config.
 
         Args:
             device: Override the device string. If None, uses ``self.device``
                 (after ``resolve_device`` has been called by the interface).
+            resolved_img_size: Pre-resolved img_size (from to_inference_config).
+                If None, uses self.preprocess.img_size (or 2048 if 0).
 
         Returns:
             PreprocessConfig ready to pass to ``preprocess_frame``.
         """
         from corridorkey_new.preprocessor import PreprocessConfig
 
+        img_size = resolved_img_size or self.preprocess.img_size or 2048
+
         return PreprocessConfig(
-            img_size=self.preprocess.img_size,
+            img_size=img_size,
             device=device or self.device,
             resize_strategy=self.preprocess.resize_strategy,
         )
@@ -217,31 +241,79 @@ class CorridorKeyConfig(BaseModel):
 
         Returns:
             InferenceConfig ready to pass to ``load_model`` / ``run_inference``.
-
-        Raises:
-            ValueError: If ``inference.checkpoint_path`` is not set.
         """
         import torch
 
         from corridorkey_new.inference import InferenceConfig
+        from corridorkey_new.inference.config import adaptive_img_size
+        from corridorkey_new.inference.orchestrator import _probe_vram_gb
         from corridorkey_new.infra.model_hub import default_checkpoint_path
 
         checkpoint = self.inference.checkpoint_path or default_checkpoint_path()
+        resolved_device = device or self.device
 
         _precision_map = {
             "float32": torch.float32,
             "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
         }
+
+        if self.inference.model_precision == "auto":
+            model_dtype = _resolve_precision_auto(resolved_device)
+        else:
+            model_dtype = _precision_map[self.inference.model_precision]
+
+        # Resolve img_size: 0 means auto-select based on VRAM.
+        if self.preprocess.img_size == 0:
+            vram_gb = _probe_vram_gb(resolved_device)
+            img_size = adaptive_img_size(vram_gb)
+            logger.info(
+                "img_size auto: %.1f GB VRAM detected → img_size=%d",
+                vram_gb,
+                img_size,
+            )
+        else:
+            img_size = self.preprocess.img_size
 
         return InferenceConfig(
             checkpoint_path=checkpoint,
-            device=device or self.device,
-            img_size=self.preprocess.img_size,
+            device=resolved_device,
+            img_size=img_size,
             use_refiner=self.inference.use_refiner,
             mixed_precision=self.inference.mixed_precision,
-            model_precision=_precision_map[self.inference.model_precision],
+            model_precision=model_dtype,
             optimization_mode=self.inference.optimization_mode,
+            refiner_scale=self.inference.refiner_scale,
         )
+
+
+def _resolve_precision_auto(device: str) -> torch.dtype:
+    """Auto-select model weight dtype based on device capabilities.
+
+    - CPU            → float32
+    - MPS            → bfloat16
+    - CUDA Ampere+   → bfloat16  (compute capability >= 8.0)
+    - CUDA pre-Ampere → float16
+    - fallback       → float32
+    """
+    import torch
+
+    dev = torch.device(device)
+    if dev.type == "cpu":
+        logger.info("Precision auto -> float32 (CPU)")
+        return torch.float32
+    if dev.type == "mps":
+        logger.info("Precision auto -> bfloat16 (Apple Silicon MPS)")
+        return torch.bfloat16
+    if dev.type == "cuda" and torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(dev)
+        if props.major >= 8:
+            logger.info("Precision auto -> bfloat16 (Ampere+ GPU: %s)", props.name)
+            return torch.bfloat16
+        logger.info("Precision auto -> float16 (pre-Ampere GPU: %s)", props.name)
+        return torch.float16
+    logger.info("Precision auto -> float32 (fallback)")
+    return torch.float32
 
 
 def load_config(overrides: dict | None = None) -> CorridorKeyConfig:

@@ -66,6 +66,10 @@ def load_model(config: InferenceConfig) -> torch.nn.Module:
     model = model.to(config.model_precision)
     model.eval()
 
+    # Enable TF32 on Ampere+ for faster matmuls with minimal precision loss.
+    if config.model_precision != torch.float32 or config.mixed_precision:
+        torch.set_float32_matmul_precision("high")
+
     logger.info("Loading checkpoint: %s", config.checkpoint_path)
     checkpoint = torch.load(config.checkpoint_path, map_location=config.device, weights_only=True)
     state_dict = checkpoint.get("state_dict", checkpoint)
@@ -92,11 +96,15 @@ def load_model(config: InferenceConfig) -> torch.nn.Module:
     # torch.compile: speed mode on CUDA only.
     # Disabled in lowvram mode — hooks + compile are incompatible (Dynamo
     # sees the refiner module twice and raises "already tracked for mutation").
-    # Also disabled for mixed-dtype models (dtype mismatches in Dynamo tracing).
+    # Also disabled for mixed-dtype models (reduced precision backbone
+    # + float32 BN/refiner) because Dynamo tracing can hit dtype mismatches.
+    # A model is "mixed dtype" when the backbone runs in bf16/fp16 but
+    # BN/refiner layers are kept in float32 — i.e. when model_precision != fp32.
     device_type = torch.device(config.device).type
+    is_mixed_dtype = config.model_precision != torch.float32
     use_compile = (
         config.optimization_mode == "speed"
-        and config.model_precision == torch.float32
+        and not is_mixed_dtype
         and device_type == "cuda"
         and sys.platform in ("linux", "win32")
     )

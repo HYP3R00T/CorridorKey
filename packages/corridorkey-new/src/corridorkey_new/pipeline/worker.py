@@ -20,6 +20,7 @@ import torch.nn as nn
 
 from corridorkey_new.events import PipelineEvents
 from corridorkey_new.inference import InferenceConfig, InferenceResult, run_inference
+from corridorkey_new.inference.orchestrator import _free_vram_if_needed
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.loader.validator import get_frame_files
 from corridorkey_new.pipeline.queue import STOP, BoundedQueue
@@ -135,6 +136,7 @@ class InferenceWorker:
                     if self.events:
                         self.events.inference_start(item.meta.frame_index)
                     result = run_inference(item, self.model, self.config)
+                    _free_vram_if_needed(self.config.device)
                     self.output_queue.put(result)
                     logger.debug("inference_worker: queued frame %d", item.meta.frame_index)
                     if self.events:

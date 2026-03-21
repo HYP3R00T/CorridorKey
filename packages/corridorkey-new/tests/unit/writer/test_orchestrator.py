@@ -16,6 +16,7 @@ def _make_frame(h: int = 16, w: int = 16, stem: str = "frame_000000") -> Postpro
     return PostprocessedFrame(
         alpha=np.full((h, w, 1), 0.5, dtype=np.float32),
         fg=np.full((h, w, 3), 0.4, dtype=np.float32),
+        processed=np.full((h, w, 4), 0.2, dtype=np.float32),
         comp=np.full((h, w, 3), 0.3, dtype=np.float32),
         frame_index=0,
         source_h=h,
@@ -58,41 +59,49 @@ class TestExrFlags:
 class TestWriteFrame:
     def test_writes_alpha_png(self, tmp_path: Path):
         frame = _make_frame(stem="f0")
-        cfg = WriteConfig(output_dir=tmp_path, fg_enabled=False, comp_enabled=False)
+        cfg = WriteConfig(output_dir=tmp_path, fg_enabled=False, comp_enabled=False, processed_enabled=False)
         write_frame(frame, cfg)
         assert (tmp_path / "alpha" / "f0.png").exists()
 
     def test_writes_fg_png(self, tmp_path: Path):
         frame = _make_frame(stem="f0")
-        cfg = WriteConfig(output_dir=tmp_path, alpha_enabled=False, comp_enabled=False)
+        cfg = WriteConfig(output_dir=tmp_path, alpha_enabled=False, comp_enabled=False, processed_enabled=False)
         write_frame(frame, cfg)
         assert (tmp_path / "fg" / "f0.png").exists()
 
     def test_writes_comp_png(self, tmp_path: Path):
         frame = _make_frame(stem="f0")
-        cfg = WriteConfig(output_dir=tmp_path, alpha_enabled=False, fg_enabled=False)
+        cfg = WriteConfig(output_dir=tmp_path, alpha_enabled=False, fg_enabled=False, processed_enabled=False)
         write_frame(frame, cfg)
         assert (tmp_path / "comp" / "f0.png").exists()
 
     def test_creates_subdirectories(self, tmp_path: Path):
         frame = _make_frame(stem="f0")
-        cfg = WriteConfig(output_dir=tmp_path)
+        cfg = WriteConfig(output_dir=tmp_path, processed_format="png")
         write_frame(frame, cfg)
         assert (tmp_path / "alpha").is_dir()
         assert (tmp_path / "fg").is_dir()
         assert (tmp_path / "comp").is_dir()
+        assert (tmp_path / "processed").is_dir()
 
     def test_disabled_outputs_not_written(self, tmp_path: Path):
         frame = _make_frame(stem="f0")
-        cfg = WriteConfig(output_dir=tmp_path, alpha_enabled=False, fg_enabled=False, comp_enabled=False)
+        cfg = WriteConfig(
+            output_dir=tmp_path,
+            alpha_enabled=False,
+            fg_enabled=False,
+            comp_enabled=False,
+            processed_enabled=False,
+        )
         write_frame(frame, cfg)
         assert not (tmp_path / "alpha").exists()
         assert not (tmp_path / "fg").exists()
         assert not (tmp_path / "comp").exists()
+        assert not (tmp_path / "processed").exists()
 
     def test_png_pixel_values_correct(self, tmp_path: Path):
         frame = _make_frame(stem="f0")
-        cfg = WriteConfig(output_dir=tmp_path, fg_enabled=False, comp_enabled=False)
+        cfg = WriteConfig(output_dir=tmp_path, fg_enabled=False, comp_enabled=False, processed_enabled=False)
         write_frame(frame, cfg)
         img = cv2.imread(str(tmp_path / "alpha" / "f0.png"))
         assert img is not None
@@ -100,7 +109,7 @@ class TestWriteFrame:
         assert 126 <= img[0, 0, 0] <= 129
 
     def test_multiple_frames_sequential(self, tmp_path: Path):
-        cfg = WriteConfig(output_dir=tmp_path, fg_enabled=False, comp_enabled=False)
+        cfg = WriteConfig(output_dir=tmp_path, fg_enabled=False, comp_enabled=False, processed_enabled=False)
         for i in range(3):
             frame = _make_frame(stem=f"frame_{i:06d}")
             write_frame(frame, cfg)
@@ -111,6 +120,6 @@ class TestWriteFrame:
         # Make output_dir a file so mkdir fails
         bad_dir = tmp_path / "not_a_dir.txt"
         bad_dir.write_text("x")
-        cfg = WriteConfig(output_dir=bad_dir, fg_enabled=False, comp_enabled=False)
+        cfg = WriteConfig(output_dir=bad_dir, fg_enabled=False, comp_enabled=False, processed_enabled=False)
         with pytest.raises((OSError, NotADirectoryError, Exception)):
             write_frame(frame, cfg)

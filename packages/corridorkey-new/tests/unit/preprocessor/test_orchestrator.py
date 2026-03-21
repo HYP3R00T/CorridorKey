@@ -127,7 +127,9 @@ class TestPreprocessFrame:
         r1 = preprocess_frame(manifest, 0, config)
         r2 = preprocess_frame(manifest, 0, config, image_files=imgs, alpha_files=alps)
         assert r1.tensor.shape == r2.tensor.shape
-        assert r1.meta == r2.meta
+        assert r1.meta.frame_index == r2.meta.frame_index
+        assert r1.meta.original_h == r2.meta.original_h
+        assert r1.meta.original_w == r2.meta.original_w
 
     def test_linear_input_converted_to_srgb(self, tmp_path: Path):
         """is_linear=True should produce a different tensor than is_linear=False."""

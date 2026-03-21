@@ -64,6 +64,18 @@ def write_frame(frame: PostprocessedFrame, config: WriteConfig) -> None:
             exr_flags,
         )
 
+    if config.processed_enabled:
+        # Premultiplied linear RGBA — convert to BGRA for cv2.
+        # Written as 16-bit PNG to preserve sub-pixel alpha precision.
+        bgra = cv2.cvtColor(frame.processed, cv2.COLOR_RGBA2BGRA)
+        _write(
+            bgra,
+            config.output_dir / "processed" / f"{frame.stem}.{config.processed_format}",
+            config.processed_format,
+            exr_flags,
+            sixteen_bit=(config.processed_format == "png"),
+        )
+
     if config.comp_enabled:
         _write(
             cv2.cvtColor(frame.comp, cv2.COLOR_RGB2BGR),
@@ -91,12 +103,16 @@ def _alpha_to_bgr(alpha: np.ndarray) -> np.ndarray:
     return np.stack([a2d, a2d, a2d], axis=-1)
 
 
-def _write(img: np.ndarray, path: Path, fmt: str, exr_flags: list[int]) -> None:
+def _write(img: np.ndarray, path: Path, fmt: str, exr_flags: list[int], sixteen_bit: bool = False) -> None:
     """Write a single image to disk, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "exr":
         arr = img if img.dtype == np.float32 else img.astype(np.float32)
         ok = cv2.imwrite(str(path), arr, exr_flags)
+    elif sixteen_bit:
+        # 16-bit PNG — preserves sub-pixel alpha precision for compositing.
+        arr = (np.clip(img, 0.0, 1.0) * 65535.0).astype(np.uint16)
+        ok = cv2.imwrite(str(path), arr)
     else:
         arr = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
         ok = cv2.imwrite(str(path), arr)

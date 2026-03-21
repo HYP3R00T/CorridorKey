@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
 
 from corridorkey_new.loader.contracts import ClipManifest
@@ -48,11 +49,16 @@ class PreprocessConfig:
             "squish" stretches to square (fast, mild distortion).
             "letterbox" pads the shorter dimension with black (preserves
             aspect ratio — not yet implemented, falls back to squish).
+        source_passthrough: If True, carry the original sRGB source image in
+            FrameMeta so the postprocessor can replace model FG in opaque
+            interior regions with original source pixels. Eliminates dark
+            fringing caused by background contamination in the model FG output.
     """
 
     img_size: int = 2048
     device: str = "cpu"
     resize_strategy: Literal["squish", "letterbox"] = "squish"
+    source_passthrough: bool = True
 
 
 @dataclass(frozen=True)
@@ -63,11 +69,15 @@ class FrameMeta:
         frame_index: Index of this frame within the clip's frame_range.
         original_h: Frame height before resizing, in pixels.
         original_w: Frame width before resizing, in pixels.
+        source_image: Original sRGB image [H, W, 3] float32 at source resolution,
+            used by postprocessor source_passthrough to replace model FG in
+            opaque interior regions. None if source passthrough is disabled.
     """
 
     frame_index: int
     original_h: int
     original_w: int
+    source_image: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +136,10 @@ def preprocess_frame(
     if manifest.is_linear:
         image = linear_to_srgb(image)
 
+    # Carry the source sRGB image at original resolution for source_passthrough.
+    # Stored before resize so postprocessor can blend at full resolution.
+    source_image: np.ndarray | None = image.copy() if config.source_passthrough else None
+
     # Step 5 — resize image and alpha to model resolution
     image, alpha = resize_frame(image, alpha, config.img_size, config.resize_strategy)
 
@@ -148,7 +162,12 @@ def preprocess_frame(
     # Step 10 — return
     return PreprocessedFrame(
         tensor=tensor,
-        meta=FrameMeta(frame_index=i, original_h=original_h, original_w=original_w),
+        meta=FrameMeta(
+            frame_index=i,
+            original_h=original_h,
+            original_w=original_w,
+            source_image=source_image,
+        ),
     )
 
 

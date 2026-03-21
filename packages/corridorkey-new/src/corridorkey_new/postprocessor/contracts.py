@@ -16,6 +16,11 @@ class PostprocessedFrame:
     Attributes:
         alpha: Alpha matte [H, W, 1], linear, range 0-1.
         fg: Foreground RGB [H, W, 3], sRGB straight, range 0-1.
+            In transparent regions the values are undefined — use ``processed``
+            for compositing work.
+        processed: Premultiplied linear RGBA [H, W, 4], range 0-1.
+            This is the primary output for compositing. Transparent regions are
+            correctly zeroed out (fg * alpha), so no black-blob artefacts.
         comp: Preview composite over checkerboard [H, W, 3], sRGB, range 0-1.
         frame_index: Frame index carried through from FrameMeta.
         source_h: Original frame height in pixels.
@@ -25,6 +30,7 @@ class PostprocessedFrame:
 
     alpha: np.ndarray
     fg: np.ndarray
+    processed: np.ndarray
     comp: np.ndarray
     frame_index: int
     source_h: int

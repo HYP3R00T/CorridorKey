@@ -1,13 +1,14 @@
 """Postprocessor stage — orchestrator.
 
-Runs steps 1–5 in order. Owns no transformation logic itself — each step
+Runs steps 1–6 in order. Owns no transformation logic itself — each step
 is delegated to its own module.
 
     Step 1 — resize tensors back to source resolution  → resize.py
     Step 2 — green spill removal                       → despill.py
     Step 3 — alpha matte cleanup (despeckle)           → despeckle.py
-    Step 4 — checkerboard preview composite            → composite.py
-    Step 5 — return PostprocessedFrame                 (here)
+    Step 4 — source passthrough (interior FG replace)  → composite.py
+    Step 5 — build processed RGBA + checkerboard comp  → composite.py
+    Step 6 — return PostprocessedFrame                 (here)
 
 Public entry point: postprocess_frame(result, config, stem="")
 """
@@ -17,7 +18,7 @@ from __future__ import annotations
 import logging
 
 from corridorkey_new.inference.contracts import InferenceResult
-from corridorkey_new.postprocessor.composite import make_preview
+from corridorkey_new.postprocessor.composite import apply_source_passthrough, make_preview, make_processed
 from corridorkey_new.postprocessor.config import PostprocessConfig
 from corridorkey_new.postprocessor.contracts import PostprocessedFrame
 from corridorkey_new.postprocessor.despeckle import despeckle_alpha
@@ -36,7 +37,7 @@ def postprocess_frame(
 
     Args:
         result: InferenceResult from the inference stage.
-        config: Postprocessing options (despill, despeckle, checkerboard).
+        config: Postprocessing options (despill, despeckle, source_passthrough).
         stem: Filename stem for output naming (e.g. "frame_000001").
             Defaults to "frame_{frame_index:06d}" when empty.
 
@@ -53,14 +54,27 @@ def postprocess_frame(
         meta.original_w,
     )
 
-    # Step 2 — green spill removal
+    # Step 2 — green spill removal (on straight sRGB FG)
     fg_np = remove_spill(fg_np, config.despill_strength)
 
     # Step 3 — alpha matte cleanup
     if config.auto_despeckle:
         alpha_np = despeckle_alpha(alpha_np, config.despeckle_size)
 
-    # Step 4 — checkerboard preview composite
+    # Step 4 — source passthrough: replace model FG in opaque interior regions
+    # with original source pixels to eliminate dark fringing from background
+    # contamination in the model FG prediction.
+    if config.source_passthrough and meta.source_image is not None:
+        fg_np = apply_source_passthrough(
+            fg_np,
+            alpha_np,
+            meta.source_image,
+            config.edge_erode_px,
+            config.edge_blur_px,
+        )
+
+    # Step 5 — build outputs
+    processed_np = make_processed(fg_np, alpha_np)
     comp_np = make_preview(fg_np, alpha_np, config.checkerboard_size)
 
     output_stem = stem or f"frame_{meta.frame_index:06d}"
@@ -73,10 +87,11 @@ def postprocess_frame(
         output_stem,
     )
 
-    # Step 5 — return
+    # Step 6 — return
     return PostprocessedFrame(
         alpha=alpha_np,
         fg=fg_np,
+        processed=processed_np,
         comp=comp_np,
         frame_index=meta.frame_index,
         source_h=meta.original_h,
