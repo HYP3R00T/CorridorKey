@@ -79,16 +79,19 @@ from corridorkey_new.inference import (
     run_inference,
 )
 from corridorkey_new.infra import (
+    APP_NAME,
     CorridorKeyConfig,
     GPUInfo,
     InferenceSettings,
     PreprocessSettings,
     detect_gpu,
     ensure_config_file,
-    export_config,
+    get_config_path,
     load_config,
+    load_config_with_metadata,
     resolve_device,
     setup_logging,
+    write_config,
 )
 from corridorkey_new.loader import ClipManifest, VideoMetadata, load, load_video_metadata, resolve_alpha
 from corridorkey_new.postprocessor import PostprocessConfig, PostprocessedFrame, postprocess_frame
@@ -119,9 +122,12 @@ __all__ = [
     # Errors
     "FrameReadError",
     # Startup
+    "APP_NAME",
     "load_config",
-    "export_config",
+    "load_config_with_metadata",
+    "write_config",
     "ensure_config_file",
+    "get_config_path",
     "setup_logging",
     "resolve_device",
     "detect_gpu",

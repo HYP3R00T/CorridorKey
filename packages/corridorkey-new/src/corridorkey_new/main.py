@@ -12,13 +12,16 @@ CLIPS_DIR = Path(r"C:\Users\Rajes\Downloads\Samples\sample_inputs_mod")
 
 
 def main() -> None:
+    from utilityhub_config import ensure_config_file
+
     from corridorkey_new import detect_gpu, load, load_config, resolve_device, scan, setup_logging
     from corridorkey_new.inference import load_model
-    from corridorkey_new.infra import ensure_config_file
+    from corridorkey_new.infra import APP_NAME
+    from corridorkey_new.infra.config import CorridorKeyConfig
     from corridorkey_new.infra.model_hub import ensure_model
     from corridorkey_new.pipeline import PipelineConfig, PipelineRunner
 
-    ensure_config_file()
+    ensure_config_file(CorridorKeyConfig(), APP_NAME)
     config = load_config()
     setup_logging(config)
 
