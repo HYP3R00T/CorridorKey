@@ -7,12 +7,15 @@ import sys
 
 import typer
 from corridorkey_new import detect_gpu
-from corridorkey_new.infra import ensure_config_file, get_config_path
+from corridorkey_new.infra import APP_NAME, get_config_path, load_config_with_metadata
+from corridorkey_new.infra.config import CorridorKeyConfig
 from corridorkey_new.infra.model_hub import MODEL_FILENAME, MODEL_URL, default_checkpoint_path, ensure_model
 from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn, TransferSpeedColumn
 from rich.prompt import Confirm
 from rich.table import Table
+from utilityhub_config import ensure_config_file
 
+from ckcli._config_table import print_config_table
 from ckcli._console import console, err_console
 
 _PASS = "[green]OK[/green]"
@@ -29,8 +32,12 @@ def init() -> None:
     console.print()
 
     # 2. Config file
-    config_path = ensure_config_file()
+    config_path = ensure_config_file(CorridorKeyConfig(), APP_NAME)
     console.print(f"[green]Config:[/green] {config_path}\n")
+
+    config_obj, metadata = load_config_with_metadata()
+    print_config_table(config_obj, metadata)
+    console.print()
 
     # 3. Inference model
     model_path = default_checkpoint_path()
@@ -74,7 +81,7 @@ def _run_health_check() -> None:
         rows.append(("compute device", _WARN, str(e)))
 
     # Config file
-    config_file = get_config_path()
+    config_file = get_config_path(APP_NAME)
     rows.append((
         "config file",
         _PASS if config_file.exists() else _WARN,

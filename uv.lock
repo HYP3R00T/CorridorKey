@@ -339,7 +339,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'cuda'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "corridorkey-new", extra = "cuda" } },
     { name = "torchvision", specifier = "==0.25.0" },
     { name = "torchvision", marker = "extra == 'cuda'", specifier = "==0.25.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "corridorkey-new", extra = "cuda" } },
-    { name = "utilityhub-config", specifier = ">=0.2.3" },
+    { name = "utilityhub-config", specifier = ">=0.2.5" },
 ]
 provides-extras = ["cuda", "rocm", "mlx"]
 
@@ -1465,6 +1465,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tomli-w"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
+]
+
+[[package]]
 name = "torch"
 version = "2.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1690,16 +1699,17 @@ wheels = [
 
 [[package]]
 name = "utilityhub-config"
-version = "0.2.3"
+version = "0.2.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "tomli-w" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/d4/849e25104846744aa74be3ca13cb273509db75489ba30cf59143370f105e/utilityhub_config-0.2.3.tar.gz", hash = "sha256:efef154aec449710a17d7ce9b14c20028aa9a38fcfbb044bc42e5d2bbb6d6b6f", size = 10819, upload-time = "2026-03-13T00:44:28.645Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/f6/8b354ab3f25efef4ad83dfa57459f914c76b9f1c98cde076d70887c17dc6/utilityhub_config-0.2.5.tar.gz", hash = "sha256:90645fe5f9e13ac9efb437308fef7d078e85d6200bbe249cb52b483c469ac2ea", size = 14431, upload-time = "2026-03-21T22:43:09.108Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/c1/7f005444ca5e4357421c8157feaa527bc5a67c7707b265199985b9d9adc2/utilityhub_config-0.2.3-py3-none-any.whl", hash = "sha256:104cef37eb3bea23f93fc156dcc8d82a5bbbc0d89d7e769b0de993f690c8e9ff", size = 15400, upload-time = "2026-03-13T00:44:27.41Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/b2/384a6278cf5b9019a24818a8fface5d9a0632aceac05e0d2357cc83ecccb/utilityhub_config-0.2.5-py3-none-any.whl", hash = "sha256:3fa69262adef1306ab61cbad6f2849bc2db947768c437bdc80cc8cb387366e33", size = 19873, upload-time = "2026-03-21T22:43:10.309Z" },
 ]
 
 [[package]]

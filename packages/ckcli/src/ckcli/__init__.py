@@ -66,18 +66,22 @@ def wizard(
     ] = False,
 ) -> None:
     """Scan, configure, and process clips. The default command."""
-    from corridorkey_new import load, load_config, resolve_alpha, resolve_device, scan, setup_logging
+    from corridorkey_new import load, resolve_alpha, resolve_device, scan, setup_logging
     from corridorkey_new.inference import load_model
-    from corridorkey_new.infra import ensure_config_file
+    from corridorkey_new.infra import APP_NAME, ensure_config_file, load_config_with_metadata
     from corridorkey_new.infra.config import CorridorKeyConfig
     from corridorkey_new.infra.model_hub import ensure_model
     from corridorkey_new.pipeline import PipelineConfig, PipelineRunner
 
+    from ckcli._config_table import print_config_table
+
     console.print(Panel("[bold cyan]CorridorKey[/bold cyan]", expand=False))
 
-    ensure_config_file()
-    config_obj = load_config()
+    ensure_config_file(CorridorKeyConfig(), APP_NAME)
+    config_obj, metadata = load_config_with_metadata()
     setup_logging(config_obj)
+    print_config_table(config_obj, metadata)
+    console.print()
 
     if clips_dir is None:
         if yes:
