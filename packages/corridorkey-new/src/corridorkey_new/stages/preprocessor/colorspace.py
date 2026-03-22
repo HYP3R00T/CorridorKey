@@ -9,6 +9,7 @@ tensor lives on (CUDA, MPS, or CPU).
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 # sRGB transfer function constants (IEC 61966-2-1)
@@ -17,6 +18,25 @@ _LINEAR_SCALE = 12.92
 _GAMMA = 1.0 / 2.4
 _SCALE = 1.055
 _OFFSET = 0.055
+
+
+def linear_to_srgb_numpy(image: np.ndarray) -> np.ndarray:
+    """Convert a linear light float32 numpy array to sRGB.
+
+    CPU equivalent of ``linear_to_srgb`` for use when the array has not yet
+    been moved to a device (e.g. source_passthrough capture before to_tensors).
+    Avoids a GPU→CPU round-trip on every frame.
+
+    Args:
+        image: float32 array [H, W, 3], linear light, range 0.0–1.0.
+
+    Returns:
+        float32 array [H, W, 3], sRGB gamma-encoded, range 0.0–1.0.
+    """
+    x = np.clip(image, 0.0, 1.0)
+    linear_part = x * _LINEAR_SCALE
+    gamma_part = _SCALE * np.power(np.maximum(x, 1e-12), _GAMMA) - _OFFSET
+    return np.where(x <= _LINEAR_THRESHOLD, linear_part, gamma_part).astype(np.float32)
 
 
 def linear_to_srgb(image: torch.Tensor) -> torch.Tensor:

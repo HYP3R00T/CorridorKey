@@ -6,12 +6,12 @@ is delegated to its own module.
     Step 1  — validate inputs            (here)
     Step 2  — read from disk             → reader.py
     Step 3  — capture original dims      (here)
-    Step 4  — move to device tensor      → tensor.py
-    Step 5  — color space conversion     → colorspace.py
-    Step 6  — resize                     → resize.py
-    Step 7  — ImageNet normalisation     → normalise.py
-    Steps 8–9 — concat + return          (here)
-    Step 10 — return PreprocessedFrame   (here)
+    Step 4  — capture source_image       (here, CPU — no GPU→CPU transfer)
+    Step 5  — move to device tensor      → tensor.py
+    Step 6  — color space conversion     → colorspace.py
+    Step 7  — resize                     → resize.py
+    Step 8  — ImageNet normalisation     → normalise.py
+    Steps 9–10 — concat + return         (here)
 
 All transforms from step 5 onward run on the configured device (CUDA, MPS,
 or CPU) — no separate fallback is needed; PyTorch handles device dispatch.
@@ -32,10 +32,10 @@ import torch
 
 from corridorkey_new.stages.loader.contracts import ClipManifest
 from corridorkey_new.stages.loader.validator import get_frame_files
-from corridorkey_new.stages.preprocessor.colorspace import linear_to_srgb
+from corridorkey_new.stages.preprocessor.colorspace import linear_to_srgb, linear_to_srgb_numpy
 from corridorkey_new.stages.preprocessor.normalise import normalise_image
 from corridorkey_new.stages.preprocessor.reader import _read_frame_pair
-from corridorkey_new.stages.preprocessor.resize import resize_frame
+from corridorkey_new.stages.preprocessor.resize import DEFAULT_UPSAMPLE_MODE, UpsampleMode, resize_frame
 from corridorkey_new.stages.preprocessor.tensor import to_tensors
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,10 @@ class PreprocessConfig:
             "squish" stretches to square (fast, mild distortion).
             "letterbox" pads the shorter dimension with black (preserves
             aspect ratio — not yet implemented, falls back to squish).
+        upsample_mode: Interpolation mode used when the source is smaller than
+            img_size. "bicubic" (default) gives the sharpest result.
+            "bilinear" is faster but slightly softer. Has no effect when
+            downscaling — area mode is always used then.
         source_passthrough: If True, carry the original sRGB source image in
             FrameMeta so the postprocessor can replace model FG in opaque
             interior regions with original source pixels. Eliminates dark
@@ -64,6 +68,7 @@ class PreprocessConfig:
     img_size: int = 2048
     device: str = "cpu"
     resize_strategy: Literal["squish", "letterbox"] = "squish"
+    upsample_mode: UpsampleMode = DEFAULT_UPSAMPLE_MODE
     source_passthrough: bool = True
 
 
@@ -136,27 +141,32 @@ def preprocess_frame(
 
     # Step 2 — read from disk (CPU NumPy — I/O boundary)
     image_path, alpha_path = _resolve_paths(manifest, i, image_files, alpha_files)
-    image, alpha = _read_frame_pair(image_path, alpha_path)
+    image, alpha, bgr = _read_frame_pair(image_path, alpha_path)
 
     # Step 3 — capture original dimensions before any resizing
     original_h, original_w = image.shape[:2]
 
-    # Step 4 — move to device; all subsequent ops run on-device
-    img_t, alp_t = to_tensors(image, alpha, config.device)  # [1,3,H,W], [1,1,H,W]
+    # Capture source image on CPU before it ever goes to the device.
+    # Doing this here avoids a GPU→CPU transfer on every frame — the array
+    # never leaves CPU, so there is no PCIe round-trip.
+    # For linear inputs we apply the sRGB conversion on CPU so the
+    # source_image stays consistent with what the model sees.
+    # Note: source_image is in RGB order regardless of bgr flag — we convert
+    # here so the postprocessor always receives a clean RGB array.
+    source_image: np.ndarray | None = None
+    if config.source_passthrough:
+        rgb = image[:, :, ::-1].copy() if bgr else image
+        source_image = linear_to_srgb_numpy(rgb) if manifest.is_linear else rgb.copy()
+
+    # Step 4 — move to device; BGR→RGB reorder happens on-device (zero-copy index)
+    img_t, alp_t = to_tensors(image, alpha, config.device, bgr=bgr)  # [1,3,H,W], [1,1,H,W]
 
     # Step 5 — color space: linear → sRGB (on device)
     if manifest.is_linear:
         img_t = linear_to_srgb(img_t)
 
-    # Carry the source sRGB image at original resolution for source_passthrough.
-    # Pulled back to CPU numpy so the postprocessor can blend at full resolution
-    # without needing to know the inference device.
-    source_image: np.ndarray | None = (
-        img_t.squeeze(0).permute(1, 2, 0).cpu().numpy() if config.source_passthrough else None
-    )
-
     # Step 6 — resize image and alpha to model resolution (on device)
-    img_t, alp_t = resize_frame(img_t, alp_t, config.img_size, config.resize_strategy)
+    img_t, alp_t = resize_frame(img_t, alp_t, config.img_size, config.resize_strategy, config.upsample_mode)
 
     # Step 7 — ImageNet normalisation (image only, on device)
     img_t = normalise_image(img_t)

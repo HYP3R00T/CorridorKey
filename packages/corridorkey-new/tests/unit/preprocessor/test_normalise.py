@@ -38,3 +38,15 @@ class TestNormaliseImage:
         img = torch.ones(1, 3, 4, 4, dtype=torch.float32)
         result = normalise_image(img)
         assert result.max().item() > 1.0
+
+    def test_in_place_modifies_input(self):
+        """normalise_image operates in-place — the returned tensor is the same object."""
+        img = torch.rand(1, 3, 4, 4, dtype=torch.float32)
+        original_data_ptr = img.data_ptr()
+        result = normalise_image(img)
+        assert result.data_ptr() == original_data_ptr
+
+    def test_3d_input_shape_preserved(self):
+        img = torch.rand(3, 8, 8, dtype=torch.float32)
+        result = normalise_image(img)
+        assert result.shape == (3, 8, 8)

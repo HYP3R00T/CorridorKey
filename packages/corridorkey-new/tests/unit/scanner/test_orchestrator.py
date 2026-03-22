@@ -176,3 +176,63 @@ class TestScanEvents:
     def test_events_none_does_not_raise(self, tmp_path: Path):
         _make_clip_dir(tmp_path)
         scan(tmp_path, events=None)  # should not raise
+
+
+class TestScanPermissionErrors:
+    def test_permission_error_on_iterdir_raises(self, tmp_path: Path):
+        """PermissionError on top-level iterdir must propagate."""
+        from unittest.mock import patch
+
+        # We need to reach the `sorted(path.iterdir())` line in the orchestrator.
+        # That line is only reached after try_build_clip returns (None, None).
+        # Patch try_build_clip AND Path.iterdir together — but iterdir is also
+        # called inside _find_icase (via try_build_clip). Since we mock
+        # try_build_clip out entirely, the only remaining iterdir call is the
+        # orchestrator's own `sorted(path.iterdir())`.
+        with patch(
+            "corridorkey_new.stages.scanner.orchestrator.try_build_clip",
+            return_value=(None, None),
+        ):
+            with patch.object(Path, "iterdir", side_effect=PermissionError("denied")):
+                with pytest.raises(PermissionError, match="Cannot read directory"):
+                    scan(tmp_path)
+
+
+class TestScanEventsExtended:
+    def test_clip_found_event_fires_for_single_clip_folder(self, tmp_path: Path):
+        """When path is itself a clip folder, on_clip_found must fire."""
+        (tmp_path / "Input").mkdir()
+        found: list[str] = []
+        events = PipelineEvents(on_clip_found=lambda name, root: found.append(name))
+        scan(tmp_path, events=events)
+        assert len(found) == 1
+
+    def test_clip_skipped_event_fires_for_single_clip_folder_skip(self, tmp_path: Path):
+        """When path is itself a clip folder but ambiguous, on_clip_skipped must fire."""
+        input_dir = tmp_path / "Input"
+        input_dir.mkdir()
+        (input_dir / "a.mp4").touch()
+        (input_dir / "b.mp4").touch()
+        skipped: list[str] = []
+        events = PipelineEvents(on_clip_skipped=lambda reason, path: skipped.append(reason))
+        scan(tmp_path, events=events)
+        assert len(skipped) == 1
+
+    def test_clip_skipped_event_fires_in_directory_loop(self, tmp_path: Path):
+        """Ambiguous clip inside a clips directory fires on_clip_skipped."""
+        clip_dir = tmp_path / "bad_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        (input_dir / "a.mp4").touch()
+        (input_dir / "b.mp4").touch()
+        skipped: list[str] = []
+        events = PipelineEvents(on_clip_skipped=lambda reason, path: skipped.append(reason))
+        scan(tmp_path, events=events)
+        assert len(skipped) == 1
+
+    def test_warning_logged_when_no_clips_found(self, tmp_path: Path, caplog):
+        """Empty directory with no clips or skipped paths logs a warning."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="corridorkey_new.stages.scanner.orchestrator"):
+            scan(tmp_path)
+        assert any("No clips found" in r.message for r in caplog.records)

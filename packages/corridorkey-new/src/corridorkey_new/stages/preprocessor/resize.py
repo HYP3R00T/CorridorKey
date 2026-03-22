@@ -1,11 +1,21 @@
-"""Preprocessing stage — resize (step 5).
+"""Preprocessing stage — resize.
 
 Fits image and alpha into img_size × img_size before inference.
-Both tensors are always resized with the same strategy so they stay
-spatially aligned.
+Both tensors are always resized with the same strategy and mode so they
+stay spatially aligned.
 
 Uses torch.nn.functional.interpolate so the operation runs on whatever
 device the tensors live on (CUDA, MPS, or CPU).
+
+Interpolation modes
+-------------------
+Downscaling  — "area" (anti-aliased box filter, no ringing, best quality)
+Upscaling    — "bicubic" with antialias=True (default, sharpest quality)
+             — "bilinear" with antialias=True (faster, slightly softer)
+
+The mode is configurable so users can trade quality for speed when needed.
+Quality should never be silently degraded — the default is always the
+highest-quality option for each direction.
 """
 
 from __future__ import annotations
@@ -19,6 +29,11 @@ from torch.nn import functional
 logger = logging.getLogger(__name__)
 
 ResizeStrategy = Literal["squish", "letterbox"]
+UpsampleMode = Literal["bicubic", "bilinear"]
+
+# Default upscale mode — bicubic gives the sharpest result.
+# Switch to "bilinear" for a modest speed gain at the cost of some softness.
+DEFAULT_UPSAMPLE_MODE: UpsampleMode = "bicubic"
 
 
 def resize_frame(
@@ -26,8 +41,12 @@ def resize_frame(
     alpha: torch.Tensor,
     img_size: int,
     strategy: ResizeStrategy,
+    upsample_mode: UpsampleMode = DEFAULT_UPSAMPLE_MODE,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Resize image and alpha tensors to img_size × img_size.
+
+    Downscaling uses area interpolation (anti-aliased, no ringing).
+    Upscaling uses ``upsample_mode`` with ``antialias=True`` for quality.
 
     Args:
         image: float32 [1, 3, H, W], sRGB, range 0.0–1.0.
@@ -35,6 +54,9 @@ def resize_frame(
         img_size: Target square resolution (e.g. 2048).
         strategy: "squish" or "letterbox". Letterbox is not yet implemented
             and falls back to squish with a warning.
+        upsample_mode: Interpolation mode for upscaling. "bicubic" (default)
+            gives the sharpest result. "bilinear" is faster but softer.
+            Has no effect when downscaling — area mode is always used then.
 
     Returns:
         Tuple of (image [1, 3, img_size, img_size], alpha [1, 1, img_size, img_size]),
@@ -43,7 +65,7 @@ def resize_frame(
     if strategy == "letterbox":
         logger.warning("resize_strategy='letterbox' is not yet implemented — falling back to 'squish'.")
 
-    return _squish(image, alpha, img_size)
+    return _squish(image, alpha, img_size, upsample_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -55,17 +77,30 @@ def _squish(
     image: torch.Tensor,
     alpha: torch.Tensor,
     img_size: int,
+    upsample_mode: UpsampleMode,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Stretch both tensors to img_size × img_size regardless of aspect ratio.
 
-    Uses area interpolation when downscaling (anti-aliased, preserves detail)
-    and bilinear when upscaling, matching the previous cv2.resize behaviour.
+    Downscaling: area interpolation — anti-aliased box filter, no ringing,
+    preserves fine detail better than bilinear when reducing significantly.
+
+    Upscaling: bicubic or bilinear with antialias=True — avoids aliasing
+    artefacts that appear when antialias=False (PyTorch default pre-2.0).
     """
     src_h, src_w = image.shape[2], image.shape[3]
     downscaling = (src_h > img_size) or (src_w > img_size)
-    mode = "area" if downscaling else "bilinear"
-    kwargs: dict = {} if downscaling else {"align_corners": False}
 
-    image_out = functional.interpolate(image, size=(img_size, img_size), mode=mode, **kwargs)
-    alpha_out = functional.interpolate(alpha, size=(img_size, img_size), mode=mode, **kwargs)
+    if downscaling:
+        image_out = functional.interpolate(image, size=(img_size, img_size), mode="area")
+        alpha_out = functional.interpolate(alpha, size=(img_size, img_size), mode="area")
+    else:
+        image_out = functional.interpolate(
+            image, size=(img_size, img_size), mode=upsample_mode,
+            align_corners=False, antialias=True,
+        )
+        alpha_out = functional.interpolate(
+            alpha, size=(img_size, img_size), mode=upsample_mode,
+            align_corners=False, antialias=True,
+        )
+
     return image_out, alpha_out

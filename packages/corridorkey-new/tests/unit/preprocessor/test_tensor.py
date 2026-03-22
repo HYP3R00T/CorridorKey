@@ -32,6 +32,34 @@ class TestToTensors:
         assert img_t.device.type == "cpu"
         assert alp_t.device.type == "cpu"
 
+    def test_bgr_false_preserves_channel_order(self):
+        """bgr=False — channels should come through as-is."""
+        image = np.zeros((4, 4, 3), dtype=np.float32)
+        image[:, :, 0] = 0.1  # channel 0
+        image[:, :, 1] = 0.2  # channel 1
+        image[:, :, 2] = 0.3  # channel 2
+        img_t, _ = to_tensors(image, _make_alpha(4, 4), "cpu", bgr=False)
+        assert img_t[0, 0, 0, 0].item() == pytest.approx(0.1)
+        assert img_t[0, 1, 0, 0].item() == pytest.approx(0.2)
+        assert img_t[0, 2, 0, 0].item() == pytest.approx(0.3)
+
+    def test_bgr_true_reorders_to_rgb_on_device(self):
+        """bgr=True — channel 2 (R in BGR) must become channel 0 in the tensor."""
+        image = np.zeros((4, 4, 3), dtype=np.float32)
+        image[:, :, 2] = 1.0  # red in BGR is index 2
+        img_t, _ = to_tensors(image, _make_alpha(4, 4), "cpu", bgr=True)
+        # After BGR→RGB reorder, red should be at tensor channel 0
+        assert img_t[0, 0, 0, 0].item() == pytest.approx(1.0)
+        assert img_t[0, 1, 0, 0].item() == pytest.approx(0.0)
+        assert img_t[0, 2, 0, 0].item() == pytest.approx(0.0)
+
+    def test_bgr_reorder_matches_manual_flip(self):
+        """bgr=True result must equal manually flipping channels on CPU."""
+        image = np.random.rand(8, 8, 3).astype(np.float32)
+        img_bgr, _ = to_tensors(image, _make_alpha(8, 8), "cpu", bgr=True)
+        img_rgb, _ = to_tensors(image[:, :, ::-1].copy(), _make_alpha(8, 8), "cpu", bgr=False)
+        torch.testing.assert_close(img_bgr, img_rgb)
+
 
 class TestToTensor:
     def test_output_shape(self):
@@ -52,7 +80,8 @@ class TestToTensor:
         image[:, :, 0] = 0.1
         image[:, :, 1] = 0.2
         image[:, :, 2] = 0.3
-        t = to_tensor(image, alpha, "cpu")
+        # bgr=False so channels pass through as-is
+        t = to_tensor(image, alpha, "cpu", bgr=False)
         assert t[0, 0, 0, 0].item() == pytest.approx(0.1)
         assert t[0, 1, 0, 0].item() == pytest.approx(0.2)
         assert t[0, 2, 0, 0].item() == pytest.approx(0.3)

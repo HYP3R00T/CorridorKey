@@ -174,9 +174,79 @@ class TestPreprocessFrame:
         # Tensors should differ because color space conversion was applied
         assert not torch.allclose(r_srgb.tensor, r_linear.tensor)
 
+    def test_source_passthrough_true_produces_numpy_array(self, tmp_path: Path):
+        manifest = _make_manifest(tmp_path)
+        config = PreprocessConfig(img_size=64, device="cpu", source_passthrough=True)
+        result = preprocess_frame(manifest, 0, config)
+        assert result.meta.source_image is not None
+        assert isinstance(result.meta.source_image, np.ndarray)
+
+    def test_source_passthrough_false_produces_none(self, tmp_path: Path):
+        manifest = _make_manifest(tmp_path)
+        config = PreprocessConfig(img_size=64, device="cpu", source_passthrough=False)
+        result = preprocess_frame(manifest, 0, config)
+        assert result.meta.source_image is None
+
+    def test_source_image_shape_is_original_resolution(self, tmp_path: Path):
+        """source_image must be at original resolution, not model resolution."""
+        manifest = _make_manifest(tmp_path, img_h=48, img_w=80)
+        config = PreprocessConfig(img_size=64, device="cpu", source_passthrough=True)
+        result = preprocess_frame(manifest, 0, config)
+        assert result.meta.source_image is not None
+        assert result.meta.source_image.shape == (48, 80, 3)
+
+    def test_source_image_is_srgb_for_linear_input(self, tmp_path: Path):
+        """For linear inputs, source_image must be sRGB-converted (same as model input)."""
+        clip_dir = tmp_path / "linear_clip"
+        frames_dir = clip_dir / "Frames"
+        frames_dir.mkdir(parents=True)
+        alpha_dir = clip_dir / "AlphaFrames"
+        alpha_dir.mkdir()
+        output_dir = clip_dir / "Output"
+        output_dir.mkdir()
+        # Mid-grey linear — sRGB conversion will change the values
+        grey = np.full((8, 8, 3), 128, dtype=np.uint8)
+        cv2.imwrite(str(frames_dir / "frame_000000.png"), grey)
+        cv2.imwrite(str(alpha_dir / "frame_000000.png"), np.full((8, 8), 255, dtype=np.uint8))
+
+        manifest = ClipManifest(
+            clip_name="linear",
+            clip_root=clip_dir,
+            frames_dir=frames_dir,
+            alpha_frames_dir=alpha_dir,
+            output_dir=output_dir,
+            needs_alpha=False,
+            frame_count=1,
+            frame_range=(0, 1),
+            is_linear=True,
+        )
+        config = PreprocessConfig(img_size=8, device="cpu", source_passthrough=True)
+        result = preprocess_frame(manifest, 0, config)
+        # Raw pixel value 128/255 ≈ 0.502 linear; after sRGB conversion it should be ~0.735
+        assert result.meta.source_image is not None
+        assert result.meta.source_image[0, 0, 0] > 0.6  # clearly converted, not raw linear
+
+    def test_source_image_not_affected_by_resize(self, tmp_path: Path):
+        """source_image is captured before resize — tensor is img_size, source is original."""
+        manifest = _make_manifest(tmp_path, img_h=32, img_w=32)
+        config = PreprocessConfig(img_size=16, device="cpu", source_passthrough=True)
+        result = preprocess_frame(manifest, 0, config)
+        assert result.tensor.shape == (1, 4, 16, 16)
+        assert result.meta.source_image is not None
+        assert result.meta.source_image.shape == (32, 32, 3)
+
     @pytest.mark.gpu
     def test_tensor_on_cuda(self, tmp_path: Path):
         manifest = _make_manifest(tmp_path)
         config = PreprocessConfig(img_size=64, device="cuda")
         result = preprocess_frame(manifest, 0, config)
         assert result.tensor.device.type == "cuda"
+
+    @pytest.mark.gpu
+    def test_source_image_on_cpu_even_when_device_is_cuda(self, tmp_path: Path):
+        """source_image must always be a CPU numpy array regardless of device."""
+        manifest = _make_manifest(tmp_path)
+        config = PreprocessConfig(img_size=64, device="cuda", source_passthrough=True)
+        result = preprocess_frame(manifest, 0, config)
+        assert result.meta.source_image is not None
+        assert isinstance(result.meta.source_image, np.ndarray)  # never a tensor
