@@ -6,7 +6,7 @@ to generate alpha externally via resolve_alpha() if needs_alpha is True).
 
 Public API
 ----------
-load(clip) -> ClipManifest
+load(clip, events, png_compression) -> ClipManifest
     The single entry point for stage 1. Pass a Clip from scan(), get back
     a ClipManifest with resolved frame paths, output directory, frame count,
     and linear flag. Check needs_alpha — if True, alpha generation is the
@@ -20,10 +20,23 @@ ClipManifest
     The output contract of stage 1. All downstream stages receive this.
     Contains everything needed — no stage needs to re-read the filesystem
     or re-validate what stage 1 already checked.
+
+VideoMetadata
+    Source video properties captured at extraction time. Carried to stage 6
+    for re-encoding output sequences with matching properties.
 """
 
 from corridorkey_new.stages.loader.contracts import ClipManifest
 from corridorkey_new.stages.loader.extractor import VideoMetadata, load_video_metadata
 from corridorkey_new.stages.loader.orchestrator import load, resolve_alpha
+from corridorkey_new.stages.loader.validator import FrameScan, scan_frames
 
-__all__ = ["load", "resolve_alpha", "ClipManifest", "VideoMetadata", "load_video_metadata"]
+__all__ = [
+    "load",
+    "resolve_alpha",
+    "ClipManifest",
+    "VideoMetadata",
+    "load_video_metadata",
+    "FrameScan",
+    "scan_frames",
+]

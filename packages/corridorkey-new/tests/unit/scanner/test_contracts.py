@@ -1,12 +1,13 @@
-"""Unit tests for corridorkey_new.stages.scanner.contracts — Clip."""
+"""Unit tests for corridorkey_new.stages.scanner.contracts."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-from corridorkey_new.stages.scanner.contracts import Clip
 from pydantic import ValidationError
+
+from corridorkey_new.stages.scanner.contracts import Clip, ScanResult, SkippedPath
 
 
 class TestClip:
@@ -45,3 +46,62 @@ class TestClip:
         input_dir.mkdir()
         clip = Clip(name="my_clip", root=tmp_path, input_path=input_dir, alpha_path=None)
         assert "my_clip" in repr(clip)
+
+    def test_clip_is_frozen(self, tmp_path: Path):
+        """Clip must be immutable — mutation should raise."""
+        input_dir = tmp_path / "Input"
+        input_dir.mkdir()
+        clip = Clip(name="test", root=tmp_path, input_path=input_dir, alpha_path=None)
+        with pytest.raises(Exception):
+            clip.name = "other"  # type: ignore[misc]
+
+
+class TestSkippedPath:
+    def test_basic_construction(self, tmp_path: Path):
+        s = SkippedPath(path=tmp_path, reason="test reason")
+        assert s.path == tmp_path
+        assert s.reason == "test reason"
+
+    def test_repr_contains_reason(self, tmp_path: Path):
+        s = SkippedPath(path=tmp_path, reason="multiple videos")
+        assert "multiple videos" in repr(s)
+
+    def test_is_frozen(self, tmp_path: Path):
+        s = SkippedPath(path=tmp_path, reason="x")
+        with pytest.raises(Exception):
+            s.reason = "y"  # type: ignore[misc]
+
+
+class TestScanResult:
+    def _make_clip(self, root: Path) -> Clip:
+        (root / "Input").mkdir(parents=True, exist_ok=True)
+        return Clip(name=root.name, root=root, input_path=root / "Input", alpha_path=None)
+
+    def test_empty_result(self):
+        result = ScanResult(clips=(), skipped=())
+        assert result.clip_count == 0
+        assert result.skipped_count == 0
+
+    def test_clip_count(self, tmp_path: Path):
+        clips = tuple(self._make_clip(tmp_path / f"clip_{i}") for i in range(3))
+        result = ScanResult(clips=clips, skipped=())
+        assert result.clip_count == 3
+
+    def test_skipped_count(self, tmp_path: Path):
+        skipped = (
+            SkippedPath(path=tmp_path / "a", reason="x"),
+            SkippedPath(path=tmp_path / "b", reason="y"),
+        )
+        result = ScanResult(clips=(), skipped=skipped)
+        assert result.skipped_count == 2
+
+    def test_repr(self, tmp_path: Path):
+        clip = self._make_clip(tmp_path / "c")
+        result = ScanResult(clips=(clip,), skipped=())
+        assert "clips=1" in repr(result)
+        assert "skipped=0" in repr(result)
+
+    def test_is_frozen(self, tmp_path: Path):
+        result = ScanResult(clips=(), skipped=())
+        with pytest.raises(Exception):
+            result.clips = ()  # type: ignore[misc]

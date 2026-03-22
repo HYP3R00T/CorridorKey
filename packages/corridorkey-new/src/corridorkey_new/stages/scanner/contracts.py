@@ -7,20 +7,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 class Clip(BaseModel):
     """A clip ready for stage 1. Output contract of stage 0.
 
+    Frozen — all fields are immutable after construction. Downstream stages
+    must never mutate a Clip; create a new one if a field needs to change.
+
     Attributes:
         name: Human-readable clip name derived from the folder name.
         root: Absolute path to the clip folder.
         input_path: Path to the input asset. Either the Input/ directory (for
-            pre-structured clips) or a video file inside Input/ (for normalised videos).
+            pre-structured clips) or a video file inside Input/ (for normalised
+            videos).
         alpha_path: Path to the alpha hint asset. None if absent — the interface
-            must generate alpha externally and call resolve_alpha() before proceeding.
+            must generate alpha externally and call resolve_alpha() before
+            proceeding.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     root: Path
@@ -42,3 +49,49 @@ class Clip(BaseModel):
 
     def __repr__(self) -> str:
         return f"Clip(name={self.name!r}, input={self.input_path}, alpha={self.alpha_path})"
+
+
+class SkippedPath(BaseModel):
+    """A path that was encountered during scanning but could not be used.
+
+    Attributes:
+        path: The path that was skipped.
+        reason: Human-readable explanation of why it was skipped.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    reason: str
+
+    def __repr__(self) -> str:
+        return f"SkippedPath(path={self.path}, reason={self.reason!r})"
+
+
+class ScanResult(BaseModel):
+    """Complete output of the scanner stage.
+
+    Wraps both the valid clips and any paths that were skipped, so the
+    interface can report exactly what was found and what was ignored.
+
+    Attributes:
+        clips: Valid clips ready for the loader stage.
+        skipped: Paths that were encountered but could not be used, with
+            reasons. Empty list if nothing was skipped.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    clips: tuple[Clip, ...]
+    skipped: tuple[SkippedPath, ...]
+
+    @property
+    def clip_count(self) -> int:
+        return len(self.clips)
+
+    @property
+    def skipped_count(self) -> int:
+        return len(self.skipped)
+
+    def __repr__(self) -> str:
+        return f"ScanResult(clips={self.clip_count}, skipped={self.skipped_count})"

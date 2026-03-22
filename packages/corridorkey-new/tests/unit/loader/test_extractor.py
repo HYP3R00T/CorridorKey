@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from corridorkey_new.stages.loader.extractor import (
+    DEFAULT_PNG_COMPRESSION,
     VideoMetadata,
     is_video,
     load_video_metadata,
@@ -79,15 +80,37 @@ class TestVideoMetadata:
         assert meta.color_primaries is None
 
     def test_has_audio_defaults_false(self):
-        meta = _make_meta()
-        assert meta.has_audio is False
+        assert _make_meta().has_audio is False
+
+    def test_frame_count_defaults_zero(self):
+        assert _make_meta().frame_count == 0
+
+    def test_estimated_frame_count_from_container(self):
+        meta = _make_meta(frame_count=120)
+        assert meta.estimated_frame_count == 120
+
+    def test_estimated_frame_count_from_duration(self):
+        # frame_count=0, fall back to duration * fps
+        meta = _make_meta(fps_num=24, fps_den=1, duration_s=5.0, frame_count=0)
+        assert meta.estimated_frame_count == 120
+
+    def test_estimated_frame_count_zero_when_no_info(self):
+        meta = _make_meta(frame_count=0, duration_s=None)
+        assert meta.estimated_frame_count == 0
 
     def test_model_dump_json_roundtrip(self):
-        meta = _make_meta(duration_s=12.5, has_audio=True, color_space="bt709")
+        meta = _make_meta(duration_s=12.5, has_audio=True, color_space="bt709", frame_count=300)
         restored = VideoMetadata.model_validate_json(meta.model_dump_json())
         assert restored.duration_s == 12.5
         assert restored.has_audio is True
         assert restored.color_space == "bt709"
+        assert restored.frame_count == 300
+
+
+class TestDefaultPngCompression:
+    def test_default_is_reasonable(self):
+        # Must be in valid PNG range and fast enough for intermediate frames.
+        assert 0 <= DEFAULT_PNG_COMPRESSION <= 3
 
 
 class TestSaveLoadVideoMetadata:

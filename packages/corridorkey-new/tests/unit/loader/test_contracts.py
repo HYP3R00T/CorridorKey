@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from corridorkey_new.stages.loader.contracts import ClipManifest
+from corridorkey_new.stages.loader.extractor import DEFAULT_PNG_COMPRESSION
 
 
 def _make_manifest(tmp_path: Path, **overrides: object) -> ClipManifest:
@@ -24,6 +26,7 @@ def _make_manifest(tmp_path: Path, **overrides: object) -> ClipManifest:
         frame_range=overrides.get("frame_range", (0, 10)),  # type: ignore[arg-type]
         is_linear=bool(overrides.get("is_linear", False)),
         video_meta_path=overrides.get("video_meta_path"),  # type: ignore[arg-type]
+        png_compression=int(overrides.get("png_compression", DEFAULT_PNG_COMPRESSION)),
     )
 
 
@@ -32,6 +35,14 @@ class TestClipManifest:
         m = _make_manifest(tmp_path)
         assert m.clip_name == "test"
         assert m.video_meta_path is None
+
+    def test_png_compression_defaults_to_constant(self, tmp_path: Path):
+        m = _make_manifest(tmp_path)
+        assert m.png_compression == DEFAULT_PNG_COMPRESSION
+
+    def test_png_compression_stored(self, tmp_path: Path):
+        m = _make_manifest(tmp_path, png_compression=0)
+        assert m.png_compression == 0
 
     def test_frame_range_start_negative_raises(self, tmp_path: Path):
         with pytest.raises(Exception, match="frame_range start"):
@@ -45,8 +56,21 @@ class TestClipManifest:
         with pytest.raises(Exception, match="must be less than end"):
             _make_manifest(tmp_path, frame_range=(5, 5))
 
+    def test_is_frozen(self, tmp_path: Path):
+        """ClipManifest must be immutable — mutation should raise."""
+        m = _make_manifest(tmp_path)
+        with pytest.raises(Exception):
+            m.frame_count = 99  # type: ignore[misc]
+
+    def test_model_copy_produces_new_instance(self, tmp_path: Path):
+        m = _make_manifest(tmp_path, frame_count=5, frame_range=(0, 5))
+        updated = m.model_copy(update={"clip_name": "updated"})
+        assert updated.clip_name == "updated"
+        assert m.clip_name == "test"  # original unchanged
+
     def test_model_dump_json_roundtrip(self, tmp_path: Path):
         m = _make_manifest(tmp_path, frame_count=5, frame_range=(0, 5))
         restored = ClipManifest.model_validate_json(m.model_dump_json())
         assert restored.clip_name == m.clip_name
         assert restored.frame_count == m.frame_count
+        assert restored.png_compression == m.png_compression

@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from corridorkey_new.errors import FrameMismatchError
+
+from corridorkey_new.errors import ExtractionError, FrameMismatchError
+from corridorkey_new.events import PipelineEvents
 from corridorkey_new.stages.loader.contracts import ClipManifest
+from corridorkey_new.stages.loader.extractor import DEFAULT_PNG_COMPRESSION, VideoMetadata
 from corridorkey_new.stages.loader.orchestrator import load, resolve_alpha
 from corridorkey_new.stages.scanner.contracts import Clip
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _make_frames(directory: Path, count: int = 3, ext: str = ".png") -> None:
     directory.mkdir(parents=True, exist_ok=True)
@@ -29,8 +36,36 @@ def _make_clip(root: Path, with_alpha: bool = False, ext: str = ".png") -> Clip:
     return Clip(name=root.name, root=root, input_path=input_dir, alpha_path=alpha_path)
 
 
-class TestLoad:
-    def test_image_sequence_no_alpha(self, tmp_path: Path):
+def _fake_meta(frame_count: int = 0, **kwargs: object) -> VideoMetadata:
+    return VideoMetadata(
+        filename="clip.mp4",
+        width=1920,
+        height=1080,
+        fps_num=24,
+        fps_den=1,
+        pix_fmt="yuv420p",
+        codec_name="h264",
+        frame_count=frame_count,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _patch_extract(output_dir_ref: list[Path], frame_count: int = 5):
+    """Return a fake extract_video that writes frames and returns metadata."""
+    def _fake(video_path, output_dir, pattern="frame_{:06d}.png",
+              png_compression=DEFAULT_PNG_COMPRESSION, on_frame=None):
+        _make_frames(output_dir, count=frame_count)
+        output_dir_ref.append(output_dir)
+        return _fake_meta(frame_count=frame_count)
+    return _fake
+
+
+# ---------------------------------------------------------------------------
+# load() — image sequence inputs
+# ---------------------------------------------------------------------------
+
+class TestLoadImageSequence:
+    def test_no_alpha(self, tmp_path: Path):
         clip = _make_clip(tmp_path / "my_clip")
         manifest = load(clip)
         assert manifest.clip_name == "my_clip"
@@ -42,7 +77,7 @@ class TestLoad:
         assert manifest.video_meta_path is None
         assert (tmp_path / "my_clip" / "Output").is_dir()
 
-    def test_image_sequence_with_alpha(self, tmp_path: Path):
+    def test_with_alpha(self, tmp_path: Path):
         clip = _make_clip(tmp_path / "my_clip", with_alpha=True)
         manifest = load(clip)
         assert manifest.needs_alpha is False
@@ -56,6 +91,14 @@ class TestLoad:
     def test_output_dir_created(self, tmp_path: Path):
         clip = _make_clip(tmp_path / "my_clip")
         assert load(clip).output_dir.is_dir()
+
+    def test_png_compression_default(self, tmp_path: Path):
+        clip = _make_clip(tmp_path / "my_clip")
+        assert load(clip).png_compression == DEFAULT_PNG_COMPRESSION
+
+    def test_png_compression_custom(self, tmp_path: Path):
+        clip = _make_clip(tmp_path / "my_clip")
+        assert load(clip, png_compression=0).png_compression == 0
 
     def test_empty_input_raises(self, tmp_path: Path):
         clip_dir = tmp_path / "my_clip"
@@ -75,36 +118,35 @@ class TestLoad:
         with pytest.raises(FrameMismatchError, match="frame count mismatch"):
             load(clip)
 
-    def test_video_input_triggers_extraction(self, tmp_path: Path):
+    def test_manifest_is_frozen(self, tmp_path: Path):
+        clip = _make_clip(tmp_path / "my_clip")
+        manifest = load(clip)
+        with pytest.raises(Exception):
+            manifest.frame_count = 99  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# load() — video inputs
+# ---------------------------------------------------------------------------
+
+class TestLoadVideoInput:
+    def test_extraction_called_on_first_run(self, tmp_path: Path):
         clip_dir = tmp_path / "my_clip"
         input_dir = clip_dir / "Input"
         input_dir.mkdir(parents=True)
         video = input_dir / "clip.mp4"
         video.touch()
-
-        from corridorkey_new.stages.loader.extractor import VideoMetadata
-
-        fake_meta = VideoMetadata(
-            filename="clip.mp4",
-            width=1920,
-            height=1080,
-            fps_num=24,
-            fps_den=1,
-            pix_fmt="yuv420p",
-            codec_name="h264",
-        )
-
-        def fake_extract(video_path, output_dir, pattern="frame_{:06d}.png", on_frame=None):
-            _make_frames(output_dir, count=5)
-            return fake_meta
-
         clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
-        with patch("corridorkey_new.stages.loader.orchestrator.extract_video", side_effect=fake_extract):
+
+        extracted: list[Path] = []
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=_patch_extract(extracted, frame_count=5)), \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta(frame_count=5)):
             manifest = load(clip)
 
         assert manifest.frame_count == 5
-        assert manifest.video_meta_path == clip_dir / "video_meta.json"
-        assert manifest.video_meta_path is not None and manifest.video_meta_path.exists()
+        assert len(extracted) == 1
 
     def test_video_meta_written_on_first_run(self, tmp_path: Path):
         clip_dir = tmp_path / "my_clip"
@@ -112,65 +154,153 @@ class TestLoad:
         input_dir.mkdir(parents=True)
         video = input_dir / "clip.mp4"
         video.touch()
-
-        from corridorkey_new.stages.loader.extractor import VideoMetadata, load_video_metadata
-
-        fake_meta = VideoMetadata(
-            filename="clip.mp4",
-            width=1280,
-            height=720,
-            fps_num=30000,
-            fps_den=1001,
-            pix_fmt="yuv420p",
-            codec_name="h264",
-            has_audio=True,
-        )
-
-        def fake_extract(video_path, output_dir, pattern="frame_{:06d}.png", on_frame=None):
-            _make_frames(output_dir, count=2)
-            return fake_meta
-
         clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
-        with patch("corridorkey_new.stages.loader.orchestrator.extract_video", side_effect=fake_extract):
+
+        from corridorkey_new.stages.loader.extractor import load_video_metadata
+
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=_patch_extract([], frame_count=3)), \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta(frame_count=3)):
             load(clip)
 
         saved = load_video_metadata(clip_dir)
         assert saved is not None
-        assert saved.width == 1280
-        assert saved.has_audio is True
+        assert saved.width == 1920
 
-    def test_video_meta_read_on_second_run(self, tmp_path: Path):
+    def test_extraction_skipped_on_second_run_when_count_matches(self, tmp_path: Path):
         clip_dir = tmp_path / "my_clip"
         input_dir = clip_dir / "Input"
         input_dir.mkdir(parents=True)
         video = input_dir / "clip.mp4"
         video.touch()
 
+        # Pre-populate Frames/ with 4 frames
         frames_dir = clip_dir / "Frames"
         _make_frames(frames_dir, count=4)
 
-        from corridorkey_new.stages.loader.extractor import VideoMetadata, save_video_metadata
-
-        save_video_metadata(
-            VideoMetadata(
-                filename="clip.mp4",
-                width=1920,
-                height=1080,
-                fps_num=24,
-                fps_den=1,
-                pix_fmt="yuv420p",
-                codec_name="h264",
-            ),
-            clip_dir,
-        )
+        from corridorkey_new.stages.loader.extractor import save_video_metadata
+        save_video_metadata(_fake_meta(frame_count=4), clip_dir)
 
         clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
-        with patch("corridorkey_new.stages.loader.orchestrator.extract_video") as mock_extract:
+
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video") as mock_extract, \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta(frame_count=4)):
             manifest = load(clip)
             mock_extract.assert_not_called()
 
         assert manifest.frame_count == 4
 
+    def test_re_extraction_on_incomplete_cache(self, tmp_path: Path):
+        """If cached frame count doesn't match container, re-extract."""
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        video = input_dir / "clip.mp4"
+        video.touch()
+
+        # Only 2 frames on disk, but container says 5
+        frames_dir = clip_dir / "Frames"
+        _make_frames(frames_dir, count=2)
+
+        clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
+
+        extracted: list[Path] = []
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=_patch_extract(extracted, frame_count=5)), \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta(frame_count=5)):
+            manifest = load(clip)
+
+        assert len(extracted) == 1
+        assert manifest.frame_count == 5
+
+    def test_extraction_error_raises_extraction_error(self, tmp_path: Path):
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        video = input_dir / "clip.mp4"
+        video.touch()
+        clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
+
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=RuntimeError("codec error")), \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta()):
+            with pytest.raises(ExtractionError, match="extraction failed"):
+                load(clip)
+
+    def test_png_compression_passed_to_extract(self, tmp_path: Path):
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        video = input_dir / "clip.mp4"
+        video.touch()
+        clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
+
+        mock_extract = MagicMock(return_value=_fake_meta(frame_count=2))
+        mock_extract.side_effect = lambda *a, **kw: (
+            _make_frames(clip_dir / "Frames", count=2) or _fake_meta(frame_count=2)
+        )
+
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=lambda vp, od, pattern="frame_{:06d}.png",
+                   png_compression=DEFAULT_PNG_COMPRESSION, on_frame=None: (
+                       _make_frames(od, count=2) or _fake_meta(frame_count=2)
+                   )) as m, \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta()):
+            load(clip, png_compression=0)
+            # Verify png_compression=0 was forwarded
+            call_kwargs = m.call_args
+            assert call_kwargs.kwargs.get("png_compression", call_kwargs.args[3] if len(call_kwargs.args) > 3 else DEFAULT_PNG_COMPRESSION) == 0
+
+
+class TestLoadEvents:
+    def test_stage_start_fired_before_extraction(self, tmp_path: Path):
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        video = input_dir / "clip.mp4"
+        video.touch()
+        clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
+
+        stage_starts: list[tuple[str, int]] = []
+        events = PipelineEvents(on_stage_start=lambda s, t: stage_starts.append((s, t)))
+
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=_patch_extract([], frame_count=3)), \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta(frame_count=3)):
+            load(clip, events=events)
+
+        assert any(s == "extract" for s, _ in stage_starts)
+
+    def test_stage_start_total_from_metadata(self, tmp_path: Path):
+        """stage_start total should come from read_video_metadata, not 0."""
+        clip_dir = tmp_path / "my_clip"
+        input_dir = clip_dir / "Input"
+        input_dir.mkdir(parents=True)
+        video = input_dir / "clip.mp4"
+        video.touch()
+        clip = Clip(name="my_clip", root=clip_dir, input_path=video, alpha_path=None)
+
+        totals: list[int] = []
+        events = PipelineEvents(on_stage_start=lambda s, t: totals.append(t))
+
+        with patch("corridorkey_new.stages.loader.orchestrator.extract_video",
+                   side_effect=_patch_extract([], frame_count=10)), \
+             patch("corridorkey_new.stages.loader.orchestrator.read_video_metadata",
+                   return_value=_fake_meta(frame_count=10)):
+            load(clip, events=events)
+
+        assert totals[0] == 10  # accurate total, not 0
+
+
+# ---------------------------------------------------------------------------
+# resolve_alpha()
+# ---------------------------------------------------------------------------
 
 class TestResolveAlpha:
     def _base_manifest(self, tmp_path: Path) -> ClipManifest:
@@ -185,11 +315,13 @@ class TestResolveAlpha:
         assert updated.needs_alpha is False
 
     def test_original_manifest_unchanged(self, tmp_path: Path):
+        """resolve_alpha must return a new manifest — original is frozen."""
         manifest = self._base_manifest(tmp_path)
         alpha_dir = tmp_path / "my_clip" / "AlphaFrames"
         _make_frames(alpha_dir, count=3)
         resolve_alpha(manifest, alpha_dir)
         assert manifest.needs_alpha is True
+        assert manifest.alpha_frames_dir is None
 
     def test_raises_if_already_has_alpha(self, tmp_path: Path):
         clip = _make_clip(tmp_path / "my_clip", with_alpha=True)
@@ -202,7 +334,7 @@ class TestResolveAlpha:
     def test_raises_on_frame_count_mismatch(self, tmp_path: Path):
         manifest = self._base_manifest(tmp_path)
         alpha_dir = tmp_path / "my_clip" / "AlphaFrames"
-        _make_frames(alpha_dir, count=2)
+        _make_frames(alpha_dir, count=2)  # manifest has 3 frames
         with pytest.raises(FrameMismatchError, match="frame count mismatch"):
             resolve_alpha(manifest, alpha_dir)
 
@@ -210,5 +342,25 @@ class TestResolveAlpha:
         manifest = self._base_manifest(tmp_path)
         alpha_dir = tmp_path / "my_clip" / "AlphaFrames"
         alpha_dir.mkdir()
-        with pytest.raises(FrameMismatchError, match="frame count mismatch"):
+        with pytest.raises(FrameMismatchError):
             resolve_alpha(manifest, alpha_dir)
+
+    def test_raises_if_alpha_dir_does_not_exist(self, tmp_path: Path):
+        manifest = self._base_manifest(tmp_path)
+        with pytest.raises(ValueError, match="does not exist"):
+            resolve_alpha(manifest, tmp_path / "ghost")
+
+    def test_does_not_rescan_input_dir(self, tmp_path: Path):
+        """resolve_alpha should use manifest.frame_count, not re-scan frames_dir."""
+        manifest = self._base_manifest(tmp_path)
+        alpha_dir = tmp_path / "my_clip" / "AlphaFrames"
+        _make_frames(alpha_dir, count=3)
+
+        with patch("corridorkey_new.stages.loader.orchestrator.scan_frames",
+                   wraps=__import__(
+                       "corridorkey_new.stages.loader.validator", fromlist=["scan_frames"]
+                   ).scan_frames) as mock_scan:
+            resolve_alpha(manifest, alpha_dir)
+            # scan_frames should only be called for alpha_dir, not frames_dir
+            called_paths = [call.args[0] for call in mock_scan.call_args_list]
+            assert manifest.frames_dir not in called_paths

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
+
+from corridorkey_new.stages.loader.extractor import DEFAULT_PNG_COMPRESSION
 
 
 class ClipManifest(BaseModel):
     """Output contract of stage 1. Input to all downstream stages.
+
+    Frozen — all fields are immutable after construction. Use model_copy()
+    to produce an updated manifest (e.g. in resolve_alpha).
 
     Downstream stages only receive what they need — resolved frame paths,
     output destination, and clip metadata. All discovery, validation, and
@@ -38,7 +43,11 @@ class ClipManifest(BaseModel):
         video_meta_path: Path to the ``video_meta.json`` sidecar file written
             by stage 1 during video extraction. None for image sequence inputs.
             Stage 6 reads this to re-encode output with matching properties.
+        png_compression: PNG compression level used during extraction (0–9).
+            Stored so the writer stage can use the same level for consistency.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     clip_name: str
     clip_root: Path
@@ -50,6 +59,7 @@ class ClipManifest(BaseModel):
     frame_range: tuple[int, int]
     is_linear: bool
     video_meta_path: Path | None = None
+    png_compression: int = DEFAULT_PNG_COMPRESSION
 
     @model_validator(mode="after")
     def validate_frame_range(self) -> ClipManifest:

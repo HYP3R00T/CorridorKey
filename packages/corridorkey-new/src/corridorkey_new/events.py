@@ -50,6 +50,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -87,6 +88,13 @@ class PipelineEvents:
 
     # Error events
     on_frame_error: Callable[[str, int, Exception], None] | None = field(default=None)
+
+    # Scan events
+    on_clip_found: Callable[[str, Path], None] | None = field(default=None)
+    """on_clip_found(clip_name, clip_root) — fired as each valid clip is discovered."""
+
+    on_clip_skipped: Callable[[str, Path], None] | None = field(default=None)
+    """on_clip_skipped(reason, path) — fired when a path is skipped during scanning."""
 
     # ---------------------------------------------------------------------------
     # Convenience fire helpers — check for None so call sites stay clean
@@ -127,3 +135,11 @@ class PipelineEvents:
     def frame_error(self, stage: str, frame_index: int, error: Exception) -> None:
         if self.on_frame_error:
             self.on_frame_error(stage, frame_index, error)
+
+    def clip_found(self, clip_name: str, clip_root: Path) -> None:
+        if self.on_clip_found:
+            self.on_clip_found(clip_name, clip_root)
+
+    def clip_skipped(self, reason: str, path: Path) -> None:
+        if self.on_clip_skipped:
+            self.on_clip_skipped(reason, path)
