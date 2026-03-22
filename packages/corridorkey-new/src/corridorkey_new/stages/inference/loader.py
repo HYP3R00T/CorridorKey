@@ -51,7 +51,7 @@ def load_model(config: InferenceConfig) -> torch.nn.Module:
         FileNotFoundError: If the checkpoint file does not exist.
         RuntimeError: If the checkpoint cannot be loaded.
     """
-    from corridorkey_core.model_transformer import GreenFormer
+    from corridorkey_new.stages.inference.model import GreenFormer
 
     if not config.checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {config.checkpoint_path}")

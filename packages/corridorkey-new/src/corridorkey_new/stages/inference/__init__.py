@@ -7,11 +7,15 @@ Entry points:
 Contracts:
     InferenceConfig   — checkpoint path, device, precision, optimization mode
     InferenceResult   — alpha [1,1,H,W], fg [1,3,H,W], FrameMeta
+
+Model architecture:
+    GreenFormer       — full model class (for subclassing or inspection)
 """
 
 from corridorkey_new.stages.inference.config import InferenceConfig, OptimizationMode
 from corridorkey_new.stages.inference.contracts import InferenceResult
 from corridorkey_new.stages.inference.loader import load_model
+from corridorkey_new.stages.inference.model import GreenFormer
 from corridorkey_new.stages.inference.orchestrator import run_inference
 
 __all__ = [
@@ -20,4 +24,5 @@ __all__ = [
     "InferenceConfig",
     "InferenceResult",
     "OptimizationMode",
+    "GreenFormer",
 ]
