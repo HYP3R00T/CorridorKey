@@ -21,7 +21,7 @@ run = "ty check packages"
 description = "Run type checking"
 
 [tasks.sync-cuda]
-run = "uv sync --extra cuda --all-groups"
+run = "uv sync --extra cuda --all-groups --verbose"
 description = "Run uv sync for devs"
 
 [tasks.test]
