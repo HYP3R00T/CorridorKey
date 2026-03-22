@@ -72,6 +72,20 @@ FrameMeta
     postprocessing so outputs can be resized back to source resolution.
 """
 
+from corridorkey_new.clip_state import ClipEntry, ClipState, InOutRange
+from corridorkey_new.errors import (
+    ClipScanError,
+    CorridorKeyError,
+    DeviceError,
+    ExtractionError,
+    FrameMismatchError,
+    FrameReadError,
+    InvalidStateTransitionError,
+    JobCancelledError,
+    ModelError,
+    VRAMInsufficientError,
+    WriteFailureError,
+)
 from corridorkey_new.inference import (
     InferenceConfig,
     InferenceResult,
@@ -97,7 +111,6 @@ from corridorkey_new.loader import ClipManifest, VideoMetadata, load, load_video
 from corridorkey_new.postprocessor import PostprocessConfig, PostprocessedFrame, postprocess_frame
 from corridorkey_new.preprocessor import (
     FrameMeta,
-    FrameReadError,
     PreprocessConfig,
     PreprocessedFrame,
     preprocess_frame,
@@ -119,8 +132,22 @@ __all__ = [
     "PreprocessConfig",
     "PreprocessedFrame",
     "FrameMeta",
+    # Clip state machine
+    "ClipState",
+    "ClipEntry",
+    "InOutRange",
     # Errors
+    "CorridorKeyError",
+    "ClipScanError",
+    "ExtractionError",
+    "FrameMismatchError",
     "FrameReadError",
+    "WriteFailureError",
+    "VRAMInsufficientError",
+    "DeviceError",
+    "ModelError",
+    "InvalidStateTransitionError",
+    "JobCancelledError",
     # Startup
     "APP_NAME",
     "load_config",

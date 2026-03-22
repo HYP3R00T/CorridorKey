@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from corridorkey_new.errors import FrameMismatchError
 from corridorkey_new.infra.utils import natural_sort_key
 
 IMAGE_EXTENSIONS = frozenset({".exr", ".png", ".jpg", ".jpeg", ".tiff", ".tif"})
@@ -57,7 +58,8 @@ def validate(clip_name: str, frames_dir: Path, alpha_frames_dir: Path | None) ->
         alpha_frames_dir: Resolved alpha frames directory, or None.
 
     Raises:
-        ValueError: If input has no frames or alpha frame count mismatches input.
+        ValueError: If input has no frames.
+        FrameMismatchError: If alpha frame count mismatches input.
     """
     input_count = count_frames(frames_dir)
     if input_count == 0:
@@ -66,6 +68,4 @@ def validate(clip_name: str, frames_dir: Path, alpha_frames_dir: Path | None) ->
     if alpha_frames_dir is not None:
         alpha_count = count_frames(alpha_frames_dir)
         if input_count != alpha_count:
-            raise ValueError(
-                f"Clip '{clip_name}': frame count mismatch — {input_count} input frames vs {alpha_count} alpha frames"
-            )
+            raise FrameMismatchError(clip_name, input_count, alpha_count)

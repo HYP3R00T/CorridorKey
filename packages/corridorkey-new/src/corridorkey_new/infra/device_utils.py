@@ -12,6 +12,8 @@ import platform
 import torch
 from pydantic import BaseModel, Field
 
+from corridorkey_new.errors import DeviceError
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,7 +102,7 @@ def resolve_device(requested: str | None = None) -> str:
         Validated PyTorch device string ("cuda", "mps", or "cpu").
 
     Raises:
-        RuntimeError: If the requested backend is unavailable.
+        DeviceError: If the requested backend is unavailable.
     """
     if not requested or requested == "auto":
         gpu = detect_gpu()
@@ -111,7 +113,7 @@ def resolve_device(requested: str | None = None) -> str:
 
     if requested in ("cuda", "rocm"):
         if not torch.cuda.is_available():
-            raise RuntimeError(
+            raise DeviceError(
                 f"'{requested}' requested but torch.cuda.is_available() is False. "
                 "Install a CUDA or ROCm-enabled PyTorch build."
             )
@@ -119,7 +121,7 @@ def resolve_device(requested: str | None = None) -> str:
 
     if requested == "mps":
         if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
-            raise RuntimeError(
+            raise DeviceError(
                 "MPS requested but not available. Requires Apple Silicon (M1+) with macOS 12.3+ and PyTorch >= 1.12."
             )
         return "mps"
@@ -127,7 +129,7 @@ def resolve_device(requested: str | None = None) -> str:
     if requested == "cpu":
         return "cpu"
 
-    raise RuntimeError(f"Unknown device '{requested}'. Valid options: auto, cuda, rocm, mps, cpu.")
+    raise DeviceError(f"Unknown device '{requested}'. Valid options: auto, cuda, rocm, mps, cpu.")
 
 
 def clear_device_cache(device: str) -> None:

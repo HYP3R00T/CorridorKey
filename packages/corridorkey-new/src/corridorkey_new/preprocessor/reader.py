@@ -15,11 +15,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from corridorkey_new.errors import FrameReadError
+
 logger = logging.getLogger(__name__)
-
-
-class FrameReadError(Exception):
-    """Raised when a frame cannot be read or decoded."""
 
 
 def _read_frame_pair(

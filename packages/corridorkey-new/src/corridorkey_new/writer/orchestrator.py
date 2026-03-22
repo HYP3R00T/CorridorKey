@@ -18,6 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from corridorkey_new.errors import WriteFailureError
 from corridorkey_new.postprocessor.contracts import PostprocessedFrame
 from corridorkey_new.writer.contracts import WriteConfig
 
@@ -117,4 +118,4 @@ def _write(img: np.ndarray, path: Path, fmt: str, exr_flags: list[int], sixteen_
         arr = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
         ok = cv2.imwrite(str(path), arr)
     if not ok:
-        raise OSError(f"cv2.imwrite failed: {path}")
+        raise WriteFailureError(str(path))

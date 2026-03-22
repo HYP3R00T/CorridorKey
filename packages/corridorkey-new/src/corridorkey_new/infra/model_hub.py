@@ -20,6 +20,8 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from corridorkey_new.errors import ModelError
+
 logger = logging.getLogger(__name__)
 
 MODEL_URL = "https://huggingface.co/nikopueringer/CorridorKey_v1.0/resolve/main/CorridorKey_v1.0.pth"
@@ -47,7 +49,7 @@ def ensure_model(
         Absolute path to the verified checkpoint file.
 
     Raises:
-        RuntimeError: If the download fails or the checksum doesn't match.
+        ModelError: If the download fails or the checksum doesn't match.
     """
     directory = (dest_dir or DEFAULT_MODEL_DIR).expanduser()
     dest = directory / MODEL_FILENAME
@@ -82,7 +84,7 @@ def ensure_model(
 
     except Exception as e:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"Model download failed: {e}") from e
+        raise ModelError(f"Model download failed: {e}") from e
 
     print()  # newline after progress bar
 
@@ -91,7 +93,7 @@ def ensure_model(
         actual = _sha256(tmp)
         if actual != MODEL_CHECKSUM.lower():
             tmp.unlink(missing_ok=True)
-            raise RuntimeError(
+            raise ModelError(
                 f"Checksum mismatch for {MODEL_FILENAME}.\n"
                 f"  Expected: {MODEL_CHECKSUM}\n"
                 f"  Got:      {actual}\n"

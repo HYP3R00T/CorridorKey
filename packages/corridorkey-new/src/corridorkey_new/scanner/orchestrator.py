@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from corridorkey_new.errors import ClipScanError
 from corridorkey_new.scanner.contracts import Clip
 from corridorkey_new.scanner.normaliser import VIDEO_EXTENSIONS, normalise_video, try_build_clip
 
@@ -37,18 +38,18 @@ def scan(path: str | Path, reorganise: bool = True) -> list[Clip]:
         List of Clip objects ready for the loader stage.
 
     Raises:
-        ValueError: If the path does not exist or an unrecognised file type is given.
+        ClipScanError: If the path does not exist or is an unrecognised file type.
         PermissionError: If a directory cannot be read.
         OSError: If video reorganisation fails.
     """
     path = Path(path)
 
     if not path.exists():
-        raise ValueError(f"Path does not exist: {path}")
+        raise ClipScanError(f"Path does not exist: {path}")
 
     if path.is_file():
         if path.suffix.lower() not in VIDEO_EXTENSIONS:
-            raise ValueError(f"File is not a recognised video format: {path}")
+            raise ClipScanError(f"File is not a recognised video format: {path}")
         if reorganise:
             return [normalise_video(path)]
         return []

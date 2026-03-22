@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from corridorkey_new.errors import ExtractionError
 from corridorkey_new.events import PipelineEvents
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.loader.extractor import extract_video, is_video, save_video_metadata
@@ -37,8 +38,8 @@ def load(clip: Clip, events: PipelineEvents | None = None) -> ClipManifest:
         alpha externally via resolve_alpha() if needs_alpha is True.
 
     Raises:
-        ValueError: If validation fails.
-        RuntimeError: If video extraction fails.
+        FrameMismatchError: If validation fails.
+        ExtractionError: If video extraction fails.
     """
     frames_dir = _resolve_frames(clip.input_path, "Frames", events=events)
     alpha_frames_dir = _resolve_frames(clip.alpha_path, "AlphaFrames", events=events) if clip.alpha_path else None
@@ -87,11 +88,14 @@ def _resolve_frames(path: Path, extracted_dir_name: str, events: PipelineEvents 
     if events:
         events.stage_start("extract", 0)  # total unknown until container is opened
 
-    metadata = extract_video(
-        path,
-        output_dir,
-        on_frame=events.extract_frame if events else None,
-    )
+    try:
+        metadata = extract_video(
+            path,
+            output_dir,
+            on_frame=events.extract_frame if events else None,
+        )
+    except RuntimeError as e:
+        raise ExtractionError(path.parent.parent.name, str(e)) from e
 
     if events:
         events.stage_done("extract")

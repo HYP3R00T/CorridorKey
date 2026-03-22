@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from corridorkey_new.errors import FrameMismatchError
 from corridorkey_new.loader.validator import (
     count_frames,
     detect_is_linear,
@@ -107,5 +108,5 @@ class TestValidate:
         alpha_dir = tmp_path / "AlphaHint"
         _touch_frames(input_dir, ["frame_1.png", "frame_2.png"])
         _touch_frames(alpha_dir, ["alpha_1.png"])
-        with pytest.raises(ValueError, match="frame count mismatch"):
+        with pytest.raises(FrameMismatchError, match="frame count mismatch"):
             validate("test_clip", input_dir, alpha_dir)

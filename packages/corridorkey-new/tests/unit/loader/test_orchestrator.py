@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from corridorkey_new.errors import FrameMismatchError
 from corridorkey_new.loader.contracts import ClipManifest
 from corridorkey_new.loader.orchestrator import load, resolve_alpha
 from corridorkey_new.scanner.contracts import Clip
@@ -71,7 +72,7 @@ class TestLoad:
         _make_frames(input_dir, count=3)
         _make_frames(alpha_dir, count=2)
         clip = Clip(name="my_clip", root=clip_dir, input_path=input_dir, alpha_path=alpha_dir)
-        with pytest.raises(ValueError, match="frame count mismatch"):
+        with pytest.raises(FrameMismatchError, match="frame count mismatch"):
             load(clip)
 
     def test_video_input_triggers_extraction(self, tmp_path: Path):
@@ -202,12 +203,12 @@ class TestResolveAlpha:
         manifest = self._base_manifest(tmp_path)
         alpha_dir = tmp_path / "my_clip" / "AlphaFrames"
         _make_frames(alpha_dir, count=2)
-        with pytest.raises(ValueError, match="frame count mismatch"):
+        with pytest.raises(FrameMismatchError, match="frame count mismatch"):
             resolve_alpha(manifest, alpha_dir)
 
     def test_raises_on_empty_alpha_dir(self, tmp_path: Path):
         manifest = self._base_manifest(tmp_path)
         alpha_dir = tmp_path / "my_clip" / "AlphaFrames"
         alpha_dir.mkdir()
-        with pytest.raises(ValueError, match="frame count mismatch"):
+        with pytest.raises(FrameMismatchError, match="frame count mismatch"):
             resolve_alpha(manifest, alpha_dir)

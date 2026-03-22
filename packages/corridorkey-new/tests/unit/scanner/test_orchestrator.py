@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from corridorkey_new.errors import ClipScanError
 from corridorkey_new.scanner import scan
 
 
@@ -40,13 +41,13 @@ class TestScan:
         assert scan(tmp_path)[0].alpha_path is not None
 
     def test_nonexistent_path_raises(self, tmp_path: Path):
-        with pytest.raises(ValueError, match="does not exist"):
+        with pytest.raises(ClipScanError, match="does not exist"):
             scan(tmp_path / "ghost")
 
     def test_unrecognised_file_extension_raises(self, tmp_path: Path):
         f = tmp_path / "file.txt"
         f.touch()
-        with pytest.raises(ValueError, match="not a recognised video format"):
+        with pytest.raises(ClipScanError, match="not a recognised video format"):
             scan(f)
 
     def test_skips_non_clip_subdirs(self, tmp_path: Path):
