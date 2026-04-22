@@ -1,23 +1,3 @@
-"""Writer stage — orchestrator.
-
-Public entry point: write_frame(frame, config)
-
-Writes alpha, fg, and comp images to subdirectories under config.output_dir.
-Output subdirectories are created on first write.
-
-    alpha/  — alpha matte
-    fg/     — foreground colour
-    comp/   — checkerboard preview composite
-
-Performance notes
------------------
-- Per-thread scratch buffers (``_tls``) are reused across frames on the same
-  thread to avoid ~380 MB of numpy allocations per frame at 4K.
-- OpenEXR (pyexr) is used for EXR writing when available. cv2 4.13.0 has a
-  known bug where DWAB/DWAA compression produces corrupt files; pyexr avoids
-  this entirely. Falls back to cv2 with PIZ compression when pyexr is absent.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -36,6 +16,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # pyexr optional fast path
 # ---------------------------------------------------------------------------
+# cv2 4.13.0 has a known bug where DWAB/DWAA compression produces corrupt EXR
+# files. pyexr (OpenEXR) does not have this bug and supports all codecs
+# correctly. When pyexr is available it is used for all EXR writes. When it is
+# absent, cv2 is used with DWAA/DWAB silently remapped to PIZ (lossless).
 
 try:
     import Imath as _imath  # type: ignore[import-not-found]  # noqa: N813
@@ -47,10 +31,10 @@ except ImportError:
     _pyexr = None
     _imath = None
     _HAS_PYEXR = False
-    logger.debug("writer: pyexr not available — falling back to cv2 PIZ")
+    logger.debug("writer: pyexr not available — falling back to cv2 PIZ for DWAA/DWAB")
 
 # ---------------------------------------------------------------------------
-# Per-thread scratch buffers (2.3)
+# Per-thread scratch buffers
 # Reused across frames on the same thread to avoid repeated large allocations.
 # ---------------------------------------------------------------------------
 
@@ -67,7 +51,6 @@ _EXR_COMPRESSION_IDS: dict[str, int] = {
     "dwaa": 6,
     "dwab": 7,
 }
-_EXR_ID_TO_NAME: dict[int, str] = {v: k for k, v in _EXR_COMPRESSION_IDS.items()}
 
 
 def write_frame(frame: ProcessedFrame, config: WriteConfig) -> None:
@@ -78,16 +61,19 @@ def write_frame(frame: ProcessedFrame, config: WriteConfig) -> None:
         config: WriteConfig controlling which outputs to write and where.
 
     Raises:
-        OSError: If any cv2.imwrite call fails.
+        WriteFailureError: If a directory cannot be created or cv2.imwrite fails.
     """
-    exr_flags = _exr_flags(config.exr_compression)
-    exr_flags_f32 = _exr_flags(config.exr_compression, half=False)
+    compression = config.exr_compression
+    # cv2 fallback flags — DWAA/DWAB remapped to PIZ to avoid the cv2 4.13 bug.
+    exr_flags = _exr_flags_cv2(compression)
+    exr_flags_f32 = _exr_flags_cv2(compression, half=False)
 
     if config.alpha_enabled:
         _write(
             _alpha_to_bgr(frame.alpha),
             config.output_dir / "alpha" / f"{frame.stem}.{config.alpha_format}",
             config.alpha_format,
+            compression,
             exr_flags,
         )
 
@@ -96,6 +82,7 @@ def write_frame(frame: ProcessedFrame, config: WriteConfig) -> None:
             cv2.cvtColor(frame.fg, cv2.COLOR_RGB2BGR),
             config.output_dir / "fg" / f"{frame.stem}.{config.fg_format}",
             config.fg_format,
+            compression,
             exr_flags,
         )
 
@@ -116,6 +103,7 @@ def write_frame(frame: ProcessedFrame, config: WriteConfig) -> None:
             bgra,
             config.output_dir / "processed" / f"{frame.stem}.{config.processed_format}",
             config.processed_format,
+            compression,
             exr_flags_f32,  # float32 EXR — full precision for compositing
             sixteen_bit=(config.processed_format == "png"),
         )
@@ -125,14 +113,16 @@ def write_frame(frame: ProcessedFrame, config: WriteConfig) -> None:
             cv2.cvtColor(frame.comp, cv2.COLOR_RGB2BGR),
             config.output_dir / "comp" / f"{frame.stem}.{config.comp_format}",
             config.comp_format,
+            compression,
             exr_flags,
         )
 
     logger.debug("write_frame: stem=%s", frame.stem)
 
 
-def _exr_flags(compression: str, half: bool = True) -> list[int]:
-    # cv2 4.13 DWAB/DWAA bug: fall back to PIZ (lossless) for those codecs.
+def _exr_flags_cv2(compression: str, half: bool = True) -> list[int]:
+    # cv2 4.13 DWAB/DWAA bug: remap to PIZ (lossless) for the cv2 fallback path.
+    # pyexr does not have this bug and uses the original compression string directly.
     key = compression.lower()
     if key in ("dwab", "dwaa"):
         key = "piz"
@@ -141,25 +131,12 @@ def _exr_flags(compression: str, half: bool = True) -> list[int]:
     return [cv2.IMWRITE_EXR_TYPE, exr_type, cv2.IMWRITE_EXR_COMPRESSION, codec]
 
 
-def _exr_compression_name(exr_flags: list[int]) -> str:
-    """Reverse-map an exr_flags list back to a compression name string.
-
-    Used to pass the user-configured compression through to pyexr, which
-    takes a name string rather than cv2 integer flags.
-    """
-    # exr_flags layout: [IMWRITE_EXR_TYPE, type_val, IMWRITE_EXR_COMPRESSION, codec_id]
-    codec_id = exr_flags[3] if len(exr_flags) >= 4 else _EXR_COMPRESSION_IDS["piz"]
-    return _EXR_ID_TO_NAME.get(codec_id, "piz")
-
-
 def _alpha_to_bgr(alpha: np.ndarray) -> np.ndarray:
-    """Convert [H, W, 1] alpha to [H, W, 3] BGR grayscale for writing."""
     a2d = alpha[:, :, 0] if alpha.ndim == 3 else alpha
     return np.stack([a2d, a2d, a2d], axis=-1)
 
 
 def _write_exr_pyexr(img: np.ndarray, path: Path, compression: str) -> None:
-    """Write an EXR file using OpenEXR (pyexr). Handles fp16 and fp32."""
     assert _pyexr is not None and _imath is not None
 
     comp_map = {
@@ -202,12 +179,16 @@ def _write_exr_pyexr(img: np.ndarray, path: Path, compression: str) -> None:
     exr_file.writePixels(channels)
 
 
-def _write(img: np.ndarray, path: Path, fmt: str, exr_flags: list[int], sixteen_bit: bool = False) -> None:
-    """Write a single image to disk using per-thread scratch buffers.
-
-    Reuses pre-allocated numpy arrays on the calling thread to avoid
-    ~95 MB of allocations per call at 4K.
-    """
+def _write(
+    img: np.ndarray,
+    path: Path,
+    fmt: str,
+    compression: str,
+    exr_flags: list[int],
+    sixteen_bit: bool = False,
+) -> None:
+    # Per-thread scratch buffers are reused across frames on the same thread
+    # to avoid ~95 MB of allocations per call at 4K.
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -217,10 +198,8 @@ def _write(img: np.ndarray, path: Path, fmt: str, exr_flags: list[int], sixteen_
         if fmt == "exr":
             arr = img if img.dtype == np.float32 else img.astype(np.float32)
             if _HAS_PYEXR:
-                # pyexr avoids the cv2 4.13 DWAB/DWAA corruption bug.
-                # Extract the compression name from exr_flags so the user's
-                # configured codec is honoured (not silently overridden).
-                compression = _exr_compression_name(exr_flags)
+                # pyexr supports all codecs correctly — pass the original compression
+                # string so the user's configured codec (e.g. dwaa) is honoured.
                 _write_exr_pyexr(arr, path, compression)
                 return
             ok = cv2.imwrite(str(path), arr, exr_flags)
@@ -230,7 +209,6 @@ def _write(img: np.ndarray, path: Path, fmt: str, exr_flags: list[int], sixteen_
             if buf is None or buf.shape != img.shape:
                 buf = np.empty(img.shape, dtype=np.uint16)
                 _tls.u16_buf = buf
-            np.multiply(np.clip(img, 0.0, 1.0), 65535.0, out=buf.astype(np.float32))
             buf[:] = (np.clip(img, 0.0, 1.0) * 65535.0).astype(np.uint16)
             ok = cv2.imwrite(str(path), buf)
         else:

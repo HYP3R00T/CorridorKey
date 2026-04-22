@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from corridorkey.stages.postprocessor.contracts import ProcessedFrame
 from corridorkey.stages.writer.contracts import WriteConfig
-from corridorkey.stages.writer.orchestrator import _alpha_to_bgr, _exr_flags, write_frame
+from corridorkey.stages.writer.orchestrator import _alpha_to_bgr, _exr_flags_cv2, write_frame
 
 
 def _make_frame(h: int = 16, w: int = 16, stem: str = "frame_000000") -> ProcessedFrame:
@@ -44,16 +44,30 @@ class TestAlphaToBgr:
         assert np.allclose(out[:, :, 2], 0.7)
 
 
-class TestExrFlags:
+class TestExrFlagsCv2:
     def test_returns_list_of_ints(self):
-        flags = _exr_flags("dwaa")
+        """_exr_flags_cv2 returns a list of integers for cv2.imwrite."""
+        flags = _exr_flags_cv2("dwaa")
         assert isinstance(flags, list)
         assert all(isinstance(f, int) for f in flags)
 
-    def test_unknown_compression_falls_back_to_dwaa(self):
-        flags_dwaa = _exr_flags("dwaa")
-        flags_unknown = _exr_flags("unknown_codec")
-        assert flags_dwaa == flags_unknown
+    def test_dwaa_remapped_to_piz_for_cv2(self):
+        """dwaa is remapped to piz in the cv2 flags to avoid the cv2 4.13 bug."""
+        flags_dwaa = _exr_flags_cv2("dwaa")
+        flags_piz = _exr_flags_cv2("piz")
+        assert flags_dwaa == flags_piz
+
+    def test_dwab_remapped_to_piz_for_cv2(self):
+        """dwab is remapped to piz in the cv2 flags to avoid the cv2 4.13 bug."""
+        flags_dwab = _exr_flags_cv2("dwab")
+        flags_piz = _exr_flags_cv2("piz")
+        assert flags_dwab == flags_piz
+
+    def test_unknown_compression_falls_back_to_piz(self):
+        """An unknown codec name falls back to piz."""
+        flags_unknown = _exr_flags_cv2("unknown_codec")
+        flags_piz = _exr_flags_cv2("piz")
+        assert flags_unknown == flags_piz
 
 
 class TestWriteFrame:
@@ -132,7 +146,7 @@ class TestWriteInternalPaths:
 
         img = np.full((8, 8, 4), 0.5, dtype=np.float32)
         path = tmp_path / "out.png"
-        _write(img, path, "png", [], sixteen_bit=True)
+        _write(img, path, "png", "dwaa", [], sixteen_bit=True)
         assert path.exists()
         loaded = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         assert loaded is not None
@@ -148,7 +162,7 @@ class TestWriteInternalPaths:
         img = np.zeros((4, 4, 3), dtype=np.uint8)
         path = tmp_path / "out.png"
         with patch("cv2.imwrite", return_value=False), pytest.raises(WriteFailureError):
-            _write(img, path, "png", [])
+            _write(img, path, "png", "dwaa", [])
 
 
 class TestProcessedPngColourSpace:
