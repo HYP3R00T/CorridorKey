@@ -4,34 +4,88 @@ site_description = "AI Green Screen Keyer by Corridor Digital"
 repo_name = "nikopueringer/CorridorKey"
 repo_url = "https://github.com/nikopueringer/CorridorKey"
 extra_javascript = [
-  "javascripts/mathjax.js",
-  "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js",
+    "javascripts/mathjax.js",
+    "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js",
 ]
 
-nav = [{ Home = "index.md" }]
+nav = [
+    { Home = "index.md" },
+    { "User Guide" = [
+        { "Overview" = "guide/index.md" },
+        { "Installation" = "guide/installation.md" },
+        { "Quick Start" = "guide/quick-start.md" },
+        { "Clips Layout" = "guide/clips-layout.md" },
+        { "Configuration" = "guide/configuration.md" },
+        { "Engine Presets" = "guide/presets.md" },
+        { "Troubleshooting" = "guide/troubleshooting.md" },
+    ] },
+    { "Theory" = [
+        { "Overview" = "theory/index.md" },
+        { "Green Screen Keying" = "theory/green-screen-keying.md" },
+        { "Alpha Matting" = "theory/alpha-matting.md" },
+        { "Despill" = "theory/despill.md" },
+        { "Output Formats" = "theory/output-formats.md" },
+    ] },
+    { "API Reference" = [
+        { "corridorkey" = [
+            { "Overview" = "api/corridorkey/index.md" },
+            { "Engine" = "api/corridorkey/engine.md" },
+            { "Runner" = "api/corridorkey/runner.md" },
+            { "Config" = "api/corridorkey/config.md" },
+            { "Errors" = "api/corridorkey/errors.md" },
+            { "Stages" = [
+                { "Overview" = "api/corridorkey/stages/index.md" },
+                { "Scanner" = "api/corridorkey/stages/scanner.md" },
+                { "Loader" = "api/corridorkey/stages/loader.md" },
+                { "Preprocessor" = "api/corridorkey/stages/preprocessor.md" },
+                { "Inference" = "api/corridorkey/stages/inference.md" },
+                { "Postprocessor" = "api/corridorkey/stages/postprocessor.md" },
+                { "Writer" = "api/corridorkey/stages/writer.md" },
+            ] },
+        ] },
+        { "corridorkey-cli" = [
+            { "Overview" = "api/corridorkey-cli/index.md" },
+            { "Commands" = "api/corridorkey-cli/commands.md" },
+        ] },
+    ] },
+    { "Architecture" = [
+        { "Overview" = "architecture/index.md" },
+        { "Pipeline Overview" = "architecture/pipeline-overview.md" },
+        { "Stage Contracts" = "architecture/stage-contracts.md" },
+        { "Device and Backends" = "architecture/device-and-backends.md" },
+        { "Runner and Concurrency" = "architecture/runner-and-concurrency.md" },
+    ] },
+    { "Developer Guide" = [
+        { "Overview" = "dev/index.md" },
+        { "Setup" = "dev/setup.md" },
+        { "Testing" = "dev/testing.md" },
+        { "Code Quality" = "dev/code-quality.md" },
+        { "Adding a Stage" = "dev/adding-a-stage.md" },
+    ] },
+]
 
 [project.theme]
 language = "en"
 features = [
-  "announce.dismiss",
-  "content.action.edit",
-  "content.action.view",
-  "content.code.annotate",
-  "content.code.copy",
-  "content.code.select",
-  "content.footnote.tooltips",
-  "content.tabs.link",
-  "content.tooltips",
-  "navigation.footer",
-  "navigation.indexes",
-  "navigation.instant",
-  "navigation.instant.prefetch",
-  "navigation.instant.progress",
-  "navigation.path",
-  "navigation.tabs",
-  "navigation.top",
-  "navigation.tracking",
-  "search.highlight",
+    "announce.dismiss",
+    "content.action.edit",
+    "content.action.view",
+    "content.code.annotate",
+    "content.code.copy",
+    "content.code.select",
+    "content.footnote.tooltips",
+    "content.tabs.link",
+    "content.tooltips",
+    "navigation.footer",
+    "navigation.indexes",
+    "navigation.instant",
+    "navigation.instant.prefetch",
+    "navigation.instant.progress",
+    "navigation.path",
+    "navigation.tabs",
+    "navigation.top",
+    "navigation.tracking",
+    "search.highlight",
 ]
 
 [[project.theme.palette]]
@@ -62,7 +116,7 @@ view = "lucide/file-braces-corner"
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
-  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
 
 [project.markdown_extensions.pymdownx.tabbed]
