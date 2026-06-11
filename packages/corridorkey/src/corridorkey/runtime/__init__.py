@@ -1,16 +1,11 @@
-"""Runtime — stateful coordination layer.
+"""Runtime — internal coordination layer.
 
-Contains everything that tracks state across pipeline invocations:
+Contains the threading infrastructure used by the Engine internally:
 
-    clip_state.py  — ClipEntry / ClipState / InOutRange state machine
+    clip_state.py  — ClipRecord / ClipState / FrameRange state machine
     queue.py       — BoundedQueue with sentinel-based shutdown
-    worker.py      — PreprocessWorker, InferenceWorker, PostWriteWorker
-    runner.py      — PipelineRunner / PipelineConfig
+    worker.py      — PreprocessWorker, PostWriteWorker
+    runner.py      — run_clip / PipelineConfig (internal frame-loop engine)
 
 Import from corridorkey directly, not from this package.
 """
-
-from corridorkey.events import PipelineEvents
-from corridorkey.runtime.runner import PipelineConfig, PipelineRunner
-
-__all__ = ["PipelineRunner", "PipelineConfig", "PipelineEvents"]

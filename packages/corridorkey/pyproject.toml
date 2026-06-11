@@ -1,14 +1,25 @@
 [project]
 name = "corridorkey"
 version = "0.1.0"
-description = "Add your description here"
+description = "Core inference pipeline library for AI-powered green screen keying"
 readme = "README.md"
+license = { file = "LICENSE" }
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Multimedia :: Video",
+]
 authors = [{ name = "Corridor Digital" }]
 maintainers = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
 requires-python = ">=3.13"
 dependencies = [
   "pydantic>=2.0",
-  "utilityhub_config>=0.2.6",
+  "utilityhub_config>=0.2.7",
   "opencv-python>=4.13.0.92",
   "av>=14.0.0",
   "torch==2.10.0",
@@ -16,6 +27,11 @@ dependencies = [
   "timm>=1.0.25",
   "nvidia-ml-py>=13.595.45",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nikopueringer/CorridorKey"
+Repository = "https://github.com/nikopueringer/CorridorKey"
+Documentation = "https://nikopueringer.github.io/CorridorKey"
 
 [dependency-groups]
 dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0", "hypothesis>=6.151.9"]
@@ -59,6 +75,10 @@ torchvision = [{ index = "pytorch-cuda", extra = "cuda" }]
 timm = { git = "https://github.com/Raiden129/pytorch-image-models-fix", branch = "fix/hiera-flash-attention-global-4d" }
 corridorkey-mlx = { git = "https://github.com/nikopueringer/corridorkey-mlx.git", extra = "mlx" }
 
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -70,21 +90,13 @@ markers = [
 [tool.coverage.run]
 omit = [
   "*/corridorkey/infra/device_utils.py",
-  "*/corridorkey/loader/extractor.py",
-  "*/corridorkey/main.py",
+  "*/corridorkey/stages/loader/extractor.py",
   # GPU/model-weight-dependent — not unit-testable without hardware
   "*/corridorkey/stages/inference/model.py",
-  "*/corridorkey/stages/inference/factory.py",
   "*/corridorkey/stages/inference/loader.py",
-  "*/corridorkey/stages/inference/orchestrator.py",
   "*/corridorkey/infra/model_hub.py",
   "*/corridorkey/infra/logging.py",
-  "*/corridorkey/runtime/runner.py",
 ]
 
 [tool.coverage.report]
 fail_under = 75
-
-[build-system]
-requires = ["uv_build>=0.10.11,<0.11.0"]
-build-backend = "uv_build"

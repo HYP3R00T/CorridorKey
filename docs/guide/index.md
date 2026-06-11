@@ -1,22 +1,12 @@
 # User Guide
 
-This guide covers everything needed to go from a fresh machine to processed footage. No programming knowledge is required.
+Everything you need to use CorridorKey from the command line.
 
-## Documents in This Section
-
-- [Installation](installation.md) - Install CorridorKey on Windows, macOS, or Linux.
-- [First run](first-run.md) - Run `corridorkey init` to download the model and verify your setup.
-- [Preparing clips](preparing-clips.md) - How to organise your footage before processing.
-- [Processing clips](processing.md) - Use the wizard to key your footage and understand the results.
-- [Outputs](outputs.md) - What files are written and how to use them in your compositing app.
-- [Troubleshooting](troubleshooting.md) - Common problems and how to fix them.
-
-## Quick Start
-
-1. Install using the one-line installer for your platform (see [Installation](installation.md)).
-2. Run `corridorkey init` to download the model.
-3. Point the wizard at a folder of green screen footage:
-
-```shell
-corridorkey wizard /path/to/clips
-```
+| Document | What it covers |
+|---|---|
+| [Installation](installation.md) | Requirements, platform extras, first-time setup |
+| [Quick Start](quick-start.md) | From install to first processed clip in five minutes |
+| [Clips Layout](clips-layout.md) | How to organise your clips directory |
+| [Configuration](configuration.md) | Config file, environment variables, priority order |
+| [Engine Presets](presets.md) | Preset table and guidance on which to pick |
+| [Troubleshooting](troubleshooting.md) | Common errors and how to fix them |

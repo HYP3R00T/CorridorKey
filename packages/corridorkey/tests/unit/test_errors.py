@@ -79,15 +79,18 @@ class TestWriteFailureError:
 
 
 class TestVRAMInsufficientError:
-    def test_message_contains_values(self):
-        err = VRAMInsufficientError(12.0, 8.5)
-        assert "12.0" in str(err)
-        assert "8.5" in str(err)
+    def test_message_contains_detail(self):
+        err = VRAMInsufficientError("CUDA out of memory")
+        assert "VRAM" in str(err)
+        assert "CUDA out of memory" in str(err)
 
-    def test_attributes(self):
-        err = VRAMInsufficientError(12.0, 8.5)
-        assert err.required_gb == pytest.approx(12.0)
-        assert err.available_gb == pytest.approx(8.5)
+    def test_no_detail(self):
+        err = VRAMInsufficientError()
+        assert "VRAM" in str(err)
+
+    def test_detail_attribute(self):
+        err = VRAMInsufficientError("detail text")
+        assert err.detail == "detail text"
 
 
 class TestInvalidStateTransitionError:
@@ -122,3 +125,40 @@ class TestJobCancelledError:
     def test_frame_index_none_by_default(self):
         err = JobCancelledError("clip")
         assert err.frame_index is None
+
+
+class TestSimpleErrors:
+    """ClipScanError, FrameReadError, DeviceError, ModelError carry no extra fields
+    but must be instantiable, have a message, and be catchable as CorridorKeyError."""
+
+    def test_clip_scan_error_message(self):
+        err = ClipScanError("path does not exist: /foo")
+        assert "/foo" in str(err)
+
+    def test_clip_scan_error_catchable_as_base(self):
+        with pytest.raises(CorridorKeyError):
+            raise ClipScanError("bad path")
+
+    def test_frame_read_error_message(self):
+        err = FrameReadError("cannot decode frame_000001.png")
+        assert "frame_000001" in str(err)
+
+    def test_frame_read_error_catchable_as_base(self):
+        with pytest.raises(CorridorKeyError):
+            raise FrameReadError("bad frame")
+
+    def test_device_error_message(self):
+        err = DeviceError("cuda requested but not available")
+        assert "cuda" in str(err)
+
+    def test_device_error_catchable_as_base(self):
+        with pytest.raises(CorridorKeyError):
+            raise DeviceError("no device")
+
+    def test_model_error_message(self):
+        err = ModelError("checksum mismatch for model.pth")
+        assert "checksum" in str(err)
+
+    def test_model_error_catchable_as_base(self):
+        with pytest.raises(CorridorKeyError):
+            raise ModelError("bad model")

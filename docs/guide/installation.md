@@ -1,82 +1,62 @@
 # Installation
 
-CorridorKey is installed as a command-line tool using the one-line installers below. The installer handles Python, the package manager, and the tool itself.
+## Requirements
 
-## System Requirements
+- Python 3.13 or later
+- A supported compute device (see table below)
+- FFmpeg — required for video input (image sequences work without it)
 
-| Requirement | Minimum |
+## Compute device support
+
+| Device | Requirement |
 |---|---|
-| Operating system | Windows 10, macOS 12, or Ubuntu 20.04 |
-| Python | 3.13 (installed automatically if missing) |
-| Disk space | 2 GB (500 MB tool + ~1.4 GB model) |
-| RAM | 8 GB |
-| GPU | Optional but strongly recommended (see below) |
+| NVIDIA GPU (CUDA) | CUDA 12.8 driver |
+| AMD GPU (ROCm) | ROCm 7.1, Linux only |
+| Apple Silicon (MPS) | macOS 13+, M1 or later |
+| CPU | No GPU required — slow |
 
-### GPU recommendations
+## Install
 
-Without a GPU, inference runs on CPU and is very slow (several minutes per frame). A GPU is strongly recommended for any practical use.
-
-| Platform | Recommended |
-|---|---|
-| Windows / Linux | NVIDIA GPU with 4 GB VRAM or more (CUDA) |
-| macOS Apple Silicon | M1 or later (MLX) |
-| macOS Intel | CPU only |
-
-## Windows
-
-Open PowerShell and run:
-
-```powershell
-irm https://corridorkey.dev/install.ps1 | iex
-```
-
-The installer will ask which GPU you have, install `uv` if needed, install CorridorKey, run first-time setup, and create a `CorridorKey - Drop Clips Here.bat` shortcut on your Desktop.
-
-## macOS and Linux
-
-Open Terminal and run:
+Install `corridorkey-cli` with the extra that matches your hardware.
 
 ```shell
-curl -sSf https://corridorkey.dev/install.sh | bash
+# NVIDIA GPU
+pip install "corridorkey-cli[cuda]"
+
+# Apple Silicon
+pip install "corridorkey-cli[mlx]"
+
+# AMD GPU (Linux)
+pip install "corridorkey-cli[rocm]"
+
+# CPU only
+pip install corridorkey-cli
 ```
 
-The installer detects Apple Silicon automatically and selects the MLX build. On Linux it asks whether you have an NVIDIA GPU. After setup it creates a launcher on your Desktop.
-
-## Manual Installation
-
-If you prefer to install without the script, use `uv tool install` directly.
-
-For NVIDIA GPU (Windows/Linux):
+If you manage your environment with `uv`:
 
 ```shell
-uv tool install "corridorkey-cli[cuda]" --python 3.13
+uv sync --extra cuda
 ```
 
-For Apple Silicon (macOS):
+## First-time setup
+
+After installing, run `ck init` once. It checks your environment, creates the config file, and offers to download the inference model.
 
 ```shell
-uv tool install "corridorkey-cli[mlx]" --python 3.13
+ck init
 ```
 
-CPU only:
+The init command checks:
 
-```shell
-uv tool install corridorkey-cli --python 3.13
-```
+- Python version (3.13+)
+- Compute device and available VRAM
+- Config file presence (`~/.config/corridorkey/corridorkey.yaml`)
+- Inference model presence (`~/.config/corridorkey/models/CorridorKey_v1.0.pth`)
 
-`uv` must be installed first. See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+If the model is not found, `ck init` will offer to download it automatically.
 
-After manual installation, run `corridorkey init` to complete setup.
+## Next steps
 
-## Verifying the Installation
-
-```shell
-corridorkey --help
-```
-
-If the command is not found after installation, close and reopen your terminal to pick up the updated PATH.
-
-## Related
-
-- [First run](first-run.md)
-- [Troubleshooting](troubleshooting.md)
+- [Quick Start](quick-start.md) — process your first clip
+- [Clips Layout](clips-layout.md) — how to organise your footage

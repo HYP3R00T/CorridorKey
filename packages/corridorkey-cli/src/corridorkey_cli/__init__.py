@@ -13,7 +13,6 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from corridorkey_cli._console import console, err_console
-from corridorkey_cli._printer import RichPrinter
 from corridorkey_cli.commands.config import config
 from corridorkey_cli.commands.init import init
 from corridorkey_cli.commands.reset import reset
@@ -66,12 +65,9 @@ def wizard(
     ] = False,
 ) -> None:
     """Scan, configure, and process clips. The default command."""
-    from corridorkey import load, resolve_alpha, resolve_device, scan, setup_logging
-    from corridorkey.infra import APP_NAME, ensure_config_file, load_config_with_metadata
+    from corridorkey import Engine, load_config_with_metadata
+    from corridorkey.infra import APP_NAME, ensure_config_file
     from corridorkey.infra.config import CorridorKeyConfig
-    from corridorkey.infra.model_hub import ensure_model
-    from corridorkey.runtime.runner import PipelineRunner
-    from corridorkey.stages.inference.loader import load_model as _load_model
 
     from corridorkey_cli._config_table import print_config_table
 
@@ -79,7 +75,6 @@ def wizard(
 
     ensure_config_file(CorridorKeyConfig(), APP_NAME, format="yaml")
     config_obj, metadata = load_config_with_metadata()
-    setup_logging(config_obj)
     print_config_table(config_obj, metadata)
     console.print()
 
@@ -94,21 +89,12 @@ def wizard(
         err_console.print(f"[red]Error:[/red] Path does not exist: {clips_dir}")
         raise typer.Exit(1)
 
-    clips = scan(clips_dir)
-    if not clips.clip_count:
-        console.print("[yellow]No clips found.[/yellow]")
-        raise typer.Exit()
-
-    _print_clip_table(clips, clips_dir)
-
     if yes:
         opt_mode = config_obj.inference.refiner_mode
         precision = config_obj.inference.model_precision
         img_size = config_obj.preprocess.img_size or 0
     else:
         opt_mode, precision, img_size = _prompt_engine_settings(config_obj)
-
-    device = resolve_device(config_obj.device)
 
     run_config = CorridorKeyConfig.model_validate({
         **config_obj.model_dump(),
@@ -123,38 +109,19 @@ def wizard(
         },
     })
 
-    inference_config, resolved_refiner_mode = run_config.to_inference_config(
-        device=device, _return_resolved_refiner_mode=True
+    engine = Engine(run_config)
+    engine.on("clip_found", lambda clip: console.print(f"[dim]Found[/dim] '[bold]{clip.name}[/bold]'"))
+    engine.on(
+        "clip_skipped",
+        lambda skipped, reason: console.print(f"[yellow]Skipped[/yellow] '[bold]{skipped.path.name}[/bold]': {reason}"),
     )
-    ensure_model(dest_dir=inference_config.checkpoint_path.parent)
+    from corridorkey_cli._printer import RichPrinter
 
-    console.print(f"\nLoading model from [cyan]{inference_config.checkpoint_path}[/cyan] ...")
-    console.print(
-        f"  img_size=[cyan]{inference_config.img_size}[/cyan]  "
-        f"precision=[cyan]{inference_config.model_precision}[/cyan]  "
-        f"refiner_mode=[cyan]{resolved_refiner_mode}[/cyan]"
-    )
+    printer = RichPrinter(total_frames=0)
+    printer.attach(engine)
 
-    model = _load_model(inference_config, resolved_refiner_mode=resolved_refiner_mode)
-    console.print("[green]Model loaded.[/green]\n")
-
-    for clip in clips.clips:
-        manifest = load(clip)
-
-        if manifest.needs_alpha:
-            console.print(f"  Alpha required for '[cyan]{manifest.clip_name}[/cyan]'.")
-            raw = Prompt.ask("  Enter path to generated alpha frames directory")
-            manifest = resolve_alpha(manifest, Path(raw))
-
-        printer = RichPrinter(manifest.frame_count)
-        pipeline_config = run_config.to_pipeline_config(device=device, model=model)
-        pipeline_config.events = printer.as_events()
-
-        console.print(f"Processing '[bold]{manifest.clip_name}[/bold]' ({manifest.frame_count} frames)...\n")
-        with printer:
-            PipelineRunner(manifest, pipeline_config).run()
-
-        console.print(f"[green]Done.[/green] Output: [cyan]{manifest.output_dir}[/cyan]\n")
+    with printer:
+        engine.run([clips_dir])
 
     console.print("[bold green]All clips complete.[/bold green]")
 
@@ -171,22 +138,6 @@ def main() -> None:
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
-
-
-# ---------------------------------------------------------------------------
-# UI helpers
-# ---------------------------------------------------------------------------
-
-
-def _print_clip_table(clips, clips_dir: Path) -> None:
-    table = Table(title=f"Clips in {clips_dir}", show_header=True, header_style="bold")
-    table.add_column("Clip")
-    table.add_column("Input")
-    table.add_column("Alpha")
-    for clip in clips.clips:
-        has_alpha = "[green]yes[/green]" if clip.alpha_path else "[dim]none[/dim]"
-        table.add_row(clip.name, str(clip.input_path), has_alpha)
-    console.print(table)
 
 
 def _prompt_engine_settings(config_obj) -> tuple[str, str, int]:

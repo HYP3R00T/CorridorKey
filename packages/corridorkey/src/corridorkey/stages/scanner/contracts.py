@@ -1,8 +1,3 @@
-"""Scanner stage — contracts.
-
-Output contract of stage 0. Consumed by the loader stage (stage 1).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,9 +17,8 @@ class Clip(BaseModel):
         input_path: Path to the input asset. Either the Input/ directory (for
             pre-structured clips) or a video file inside Input/ (for normalised
             videos).
-        alpha_path: Path to the alpha hint asset. None if absent — the interface
-            must generate alpha externally and call resolve_alpha() before
-            proceeding.
+        alpha_path: Path to the alpha hint asset. None if absent — alpha must
+            be generated externally before the clip can proceed to inference.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -51,7 +45,7 @@ class Clip(BaseModel):
         return f"Clip(name={self.name!r}, input={self.input_path}, alpha={self.alpha_path})"
 
 
-class SkippedPath(BaseModel):
+class SkippedClip(BaseModel):
     """A path that was encountered during scanning but could not be used.
 
     Attributes:
@@ -65,7 +59,7 @@ class SkippedPath(BaseModel):
     reason: str
 
     def __repr__(self) -> str:
-        return f"SkippedPath(path={self.path}, reason={self.reason!r})"
+        return f"SkippedClip(path={self.path}, reason={self.reason!r})"
 
 
 class ScanResult(BaseModel):
@@ -77,13 +71,13 @@ class ScanResult(BaseModel):
     Attributes:
         clips: Valid clips ready for the loader stage.
         skipped: Paths that were encountered but could not be used, with
-            reasons. Empty list if nothing was skipped.
+            reasons. Empty tuple if nothing was skipped.
     """
 
     model_config = ConfigDict(frozen=True)
 
     clips: tuple[Clip, ...]
-    skipped: tuple[SkippedPath, ...]
+    skipped: tuple[SkippedClip, ...]
 
     @property
     def clip_count(self) -> int:

@@ -1,12 +1,10 @@
-# Developer Docs
+# Developer Guide
 
-Everything needed to build on, contribute to, or integrate with CorridorKey.
+For contributors setting up a local environment or adding to the project.
 
-## Documents in This Section
-
-- [Setup](setup/index.md) - Clone the repo, install dependencies, run tests.
-- [Packages](packages/corridorkey/index.md) - Architecture and internals for each package.
-- [API Reference](api/corridorkey/index.md) - Auto-generated API docs for every public symbol.
-- [Testing](testing/index.md) - Unit, integration, property-based, and hardware-gated tests.
-- [Contributing](contributing/index.md) - Naming conventions, documentation standards, and authoring guides.
-- [Knowledge](../knowledge/index.md) - Pipeline theory, contracts, configuration, and design decisions.
+| Document | What it covers |
+|---|---|
+| [Setup](setup.md) | Clone, install dev dependencies, verify the environment |
+| [Testing](testing.md) | Running tests, markers, coverage |
+| [Code Quality](code-quality.md) | Ruff, ty, pre-commit, editorconfig |
+| [Adding a Stage](adding-a-stage.md) | Step-by-step guide to adding a new pipeline stage |

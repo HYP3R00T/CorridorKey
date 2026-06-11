@@ -10,90 +10,57 @@ extra_javascript = [
 
 nav = [
     { Home = "index.md" },
-    { Guide = [
+    { "User Guide" = [
         { "Overview" = "guide/index.md" },
         { "Installation" = "guide/installation.md" },
-        { "First Run" = "guide/first-run.md" },
-        { "Preparing Clips" = "guide/preparing-clips.md" },
-        { "Processing Clips (Wizard)" = "guide/processing.md" },
-        { "Outputs" = "guide/outputs.md" },
+        { "Quick Start" = "guide/quick-start.md" },
+        { "Clips Layout" = "guide/clips-layout.md" },
+        { "Configuration" = "guide/configuration.md" },
+        { "Engine Presets" = "guide/presets.md" },
         { "Troubleshooting" = "guide/troubleshooting.md" },
     ] },
-    { Knowledge = [
-        { "Overview" = "knowledge/index.md" },
-        { "Pipeline" = [
-            { "Overview" = "knowledge/pipeline/index.md" },
-            { "Alpha Matting" = "knowledge/pipeline/alpha-matting.md" },
-            { "Colour Space" = "knowledge/pipeline/colour-space.md" },
-            { "Green Spill" = "knowledge/pipeline/green-spill.md" },
-            { "The Neural Network" = "knowledge/pipeline/neural-network.md" },
-        ] },
-        { "Configuration" = "knowledge/configuration/index.md" },
+    { "Theory" = [
+        { "Overview" = "theory/index.md" },
+        { "Green Screen Keying" = "theory/green-screen-keying.md" },
+        { "Alpha Matting" = "theory/alpha-matting.md" },
+        { "Despill" = "theory/despill.md" },
+        { "Output Formats" = "theory/output-formats.md" },
     ] },
-    { Developer = [
+    { "API Reference" = [
+        { "corridorkey" = [
+            { "Overview" = "api/corridorkey/index.md" },
+            { "Engine" = "api/corridorkey/engine.md" },
+            { "Runner" = "api/corridorkey/runner.md" },
+            { "Config" = "api/corridorkey/config.md" },
+            { "Errors" = "api/corridorkey/errors.md" },
+            { "Stages" = [
+                { "Overview" = "api/corridorkey/stages/index.md" },
+                { "Scanner" = "api/corridorkey/stages/scanner.md" },
+                { "Loader" = "api/corridorkey/stages/loader.md" },
+                { "Preprocessor" = "api/corridorkey/stages/preprocessor.md" },
+                { "Inference" = "api/corridorkey/stages/inference.md" },
+                { "Postprocessor" = "api/corridorkey/stages/postprocessor.md" },
+                { "Writer" = "api/corridorkey/stages/writer.md" },
+            ] },
+        ] },
+        { "corridorkey-cli" = [
+            { "Overview" = "api/corridorkey-cli/index.md" },
+            { "Commands" = "api/corridorkey-cli/commands.md" },
+        ] },
+    ] },
+    { "Architecture" = [
+        { "Overview" = "architecture/index.md" },
+        { "Pipeline Overview" = "architecture/pipeline-overview.md" },
+        { "Stage Contracts" = "architecture/stage-contracts.md" },
+        { "Device and Backends" = "architecture/device-and-backends.md" },
+        { "Runner and Concurrency" = "architecture/runner-and-concurrency.md" },
+    ] },
+    { "Developer Guide" = [
         { "Overview" = "dev/index.md" },
-        { "Setup" = "dev/setup/index.md" },
-        { "Packages" = [
-            { "corridorkey" = [
-                { "Overview" = "dev/packages/corridorkey/index.md" },
-                { "Clip State Machine" = "dev/packages/corridorkey/clip-state.md" },
-                { "Job Queue" = "dev/packages/corridorkey/job-queue.md" },
-                { "Configuration" = "dev/packages/corridorkey/configuration.md" },
-                { "Stages" = [
-                    { "Overview" = "dev/packages/corridorkey/stages/index.md" },
-                    { "Scanner" = "dev/packages/corridorkey/stages/scanner.md" },
-                    { "Loader" = "dev/packages/corridorkey/stages/loader.md" },
-                    { "Preprocessor" = "dev/packages/corridorkey/stages/preprocessor.md" },
-                    { "Inference" = "dev/packages/corridorkey/stages/inference.md" },
-                    { "Postprocessor" = "dev/packages/corridorkey/stages/postprocessor.md" },
-                    { "Writer" = "dev/packages/corridorkey/stages/writer.md" },
-                ] },
-            ] },
-            { "corridorkey-cli" = [
-                { "Overview" = "dev/packages/corridorkey-cli/index.md" },
-                { "Commands" = "dev/packages/corridorkey-cli/commands.md" },
-            ] },
-        ] },
-        { "API Reference" = [
-            { "corridorkey" = [
-                { "Overview" = "dev/api/corridorkey/index.md" },
-                { "pipeline" = "dev/api/corridorkey/pipeline.md" },
-                { "clip-state" = "dev/api/corridorkey/clip-state.md" },
-                { "job-queue" = "dev/api/corridorkey/job-queue.md" },
-                { "errors" = "dev/api/corridorkey/errors.md" },
-                { "events" = "dev/api/corridorkey/events.md" },
-                { "device-utils" = "dev/api/corridorkey/device-utils.md" },
-                { "configuration" = "dev/api/corridorkey/configuration.md" },
-            ] },
-            { "corridorkey-cli" = [
-                { "Overview" = "dev/api/corridorkey-cli/index.md" },
-                { "wizard" = "dev/api/corridorkey-cli/wizard.md" },
-                { "init" = "dev/api/corridorkey-cli/init.md" },
-                { "config" = "dev/api/corridorkey-cli/config.md" },
-                { "reset" = "dev/api/corridorkey-cli/reset.md" },
-            ] },
-        ] },
-        { "Testing" = [
-            { "Overview" = "dev/testing/index.md" },
-            { "Unit Tests" = "dev/testing/unit-tests.md" },
-            { "Integration Tests" = "dev/testing/integration-tests.md" },
-            { "Property-Based Tests" = "dev/testing/property-tests.md" },
-            { "Hardware-Gated Tests" = "dev/testing/hardware-gated.md" },
-        ] },
-        { "Contributing" = [
-            { "Overview" = "dev/contributing/index.md" },
-            { "Naming Conventions" = "dev/contributing/naming-conventions.md" },
-            { "Authoring Documentation" = "dev/contributing/authoring-documentation.md" },
-            { "Documentation Principles" = [
-                { "Overview" = "dev/contributing/documentation-principles/index.md" },
-                { "Principle 1" = "dev/contributing/documentation-principles/principle-1-no-fiction.md" },
-                { "Principle 2" = "dev/contributing/documentation-principles/principle-2-single-responsibility.md" },
-                { "Principle 3" = "dev/contributing/documentation-principles/principle-3-scale-by-folders.md" },
-                { "Principle 4" = "dev/contributing/documentation-principles/principle-4-link-to-code.md" },
-                { "Principle 5" = "dev/contributing/documentation-principles/principle-5-format-style.md" },
-                { "Principle 6" = "dev/contributing/documentation-principles/principle-6-structure-uniformity.md" },
-            ] },
-        ] },
+        { "Setup" = "dev/setup.md" },
+        { "Testing" = "dev/testing.md" },
+        { "Code Quality" = "dev/code-quality.md" },
+        { "Adding a Stage" = "dev/adding-a-stage.md" },
     ] },
 ]
 

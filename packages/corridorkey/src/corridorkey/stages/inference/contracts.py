@@ -1,10 +1,3 @@
-"""Inference stage — output contract.
-
-InferenceResult is the single output type of the inference stage.
-It carries raw model predictions (still on device, still at model resolution)
-and the FrameMeta needed by postprocessing to resize back to source resolution.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,6 +10,16 @@ from corridorkey.stages.preprocessor.contracts import FrameMeta
 @dataclass(frozen=True)
 class InferenceResult:
     """Output contract of the inference stage. Input to postprocessing.
+
+    .. note::
+        **Pass-through type.** In the frame loop (Path 2), pass this directly
+        to :func:`~corridorkey.postprocess_frame` without inspecting its
+        fields. The tensors are on-device and at model resolution — they are
+        not useful to interface code. This type is exported so typed variables
+        can be annotated correctly::
+
+            result: InferenceResult = backend.run(preprocessed)
+            postprocessed = postprocess_frame(result, postprocess_config)
 
     Attributes:
         alpha: Predicted alpha matte [1, 1, img_size, img_size], sigmoid-activated,

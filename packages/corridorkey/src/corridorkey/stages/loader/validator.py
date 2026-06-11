@@ -1,19 +1,9 @@
-"""Stage 1 — validation.
-
-Checks that input frames exist and, if alpha is present, that counts match.
-
-All functions that need the frame file list operate on a single sorted list
-obtained from one ``iterdir()`` call. Callers should use ``scan_frames()``
-once and pass the result to the helpers that need it, rather than calling
-each helper independently (which would trigger multiple directory reads).
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from corridorkey.errors import FrameMismatchError
+from corridorkey.errors import ClipLoadError, FrameMismatchError
 from corridorkey.infra.utils import natural_sort_key
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".exr", ".png", ".jpg", ".jpeg", ".tiff", ".tif"})
@@ -42,7 +32,7 @@ def scan_frames(path: Path) -> FrameScan:
 
     Returns a FrameScan with the sorted file list and linearity flag.
     This is the single entry point for all frame discovery — call it once
-    and pass the result to ``validate_scan()`` and other helpers.
+    and pass the result to ``validate()`` and other helpers.
 
     Args:
         path: Directory to scan.
@@ -61,24 +51,31 @@ def scan_frames(path: Path) -> FrameScan:
     return FrameScan(files=tuple(files), is_linear=is_linear)
 
 
-def get_frame_files(path: Path) -> list[Path]:
-    """Return naturally sorted image files in a directory.
+def list_frames(path: Path) -> list[Path]:
+    """Return naturally sorted image files in a clip frame directory.
 
-    Convenience wrapper around scan_frames() for callers that only need the
-    file list. Prefer scan_frames() directly when you also need the count or
-    linearity flag to avoid redundant attribute access.
+    Convenience wrapper around :func:`scan_frames` for callers that only need
+    the file list. Prefer :func:`scan_frames` directly when you also need the
+    count or linearity flag to avoid redundant attribute access.
+
+    Typical use in the frame loop::
+
+        imgs = list_frames(manifest.frames_dir)
+        alps = list_frames(manifest.alpha_frames_dir)
+        for i in range(*manifest.frame_range):
+            preprocessed = preprocess_frame(manifest, i, config, image_files=imgs, alpha_files=alps)
+
+    Args:
+        path: Directory containing the frame sequence.
+
+    Returns:
+        Naturally sorted list of image file paths.
     """
     return list(scan_frames(path).files)
 
 
 def count_frames(path: Path) -> int:
-    """Count image files in a directory. Single iterdir() pass."""
     return scan_frames(path).count
-
-
-def detect_is_linear(path: Path) -> bool:
-    """Detect whether input frames are in linear light. Single iterdir() pass."""
-    return scan_frames(path).is_linear
 
 
 def validate(
@@ -86,7 +83,7 @@ def validate(
     frames_dir: Path,
     alpha_frames_dir: Path | None,
     expected_frame_count: int | None = None,
-) -> tuple[FrameScan, FrameScan | None]:
+) -> tuple[FrameScan | None, FrameScan | None]:
     """Validate resolved frame sequence directories.
 
     Performs a single iterdir() pass per directory. Returns the FrameScan
@@ -96,30 +93,33 @@ def validate(
         clip_name: Clip name for error messages.
         frames_dir: Resolved input frames directory.
         alpha_frames_dir: Resolved alpha frames directory, or None.
-        expected_frame_count: If provided, validate that frames_dir contains
-            exactly this many frames (used by resolve_alpha to avoid re-scanning
-            the input directory).
+        expected_frame_count: If provided, skip scanning frames_dir and use
+            this count instead (used by attach_alpha when the count is already
+            known from the manifest). The returned input_scan will be None.
 
     Returns:
-        (input_scan, alpha_scan) — alpha_scan is None if alpha_frames_dir is None.
+        (input_scan, alpha_scan). input_scan is None when expected_frame_count
+        is provided. alpha_scan is None if alpha_frames_dir is None.
 
     Raises:
-        ValueError: If input has no frames or count doesn't match expected.
+        ClipLoadError: If input has no frames, or alpha directory is empty.
         FrameMismatchError: If alpha frame count mismatches input.
     """
     if expected_frame_count is not None:
         # Input already validated — only scan alpha.
-        input_scan = FrameScan(files=(), is_linear=False)  # placeholder, count comes from expected
+        input_scan = None
         input_count = expected_frame_count
     else:
         input_scan = scan_frames(frames_dir)
         input_count = input_scan.count
         if input_count == 0:
-            raise ValueError(f"Clip '{clip_name}': no image frames found in {frames_dir}")
+            raise ClipLoadError(clip_name, f"no image frames found in {frames_dir}")
 
     alpha_scan: FrameScan | None = None
     if alpha_frames_dir is not None:
         alpha_scan = scan_frames(alpha_frames_dir)
+        if alpha_scan.count == 0:
+            raise ClipLoadError(clip_name, f"alpha directory is empty: {alpha_frames_dir}")
         if alpha_scan.count != input_count:
             raise FrameMismatchError(clip_name, input_count, alpha_scan.count)
 

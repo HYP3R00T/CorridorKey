@@ -19,7 +19,7 @@ State machine transitions
 
 Design notes
 ------------
-- ``ClipEntry`` wraps a ``Clip`` (scanner output) and optionally a
+- ``ClipRecord`` wraps a ``Clip`` (scanner output) and optionally a
   ``ClipManifest`` (loader output). It does not re-scan the filesystem —
   that is the scanner's job.
 - State is resolved from disk at construction time via ``resolve_state()``.
@@ -37,15 +37,10 @@ from enum import Enum
 from pathlib import Path
 
 from corridorkey.errors import InvalidStateTransitionError
-from corridorkey.stages.loader.validator import count_frames, get_frame_files
+from corridorkey.stages.loader.validator import count_frames, list_frames
 from corridorkey.stages.scanner.contracts import Clip
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# State enum
-# ---------------------------------------------------------------------------
 
 
 class ClipState(Enum):
@@ -64,7 +59,7 @@ class ClipState(Enum):
     """Inference has run and all output frames are written."""
 
     ERROR = "ERROR"
-    """A stage failed. ``ClipEntry.error_message`` contains the detail."""
+    """A stage failed. ``ClipRecord.error_message`` contains the detail."""
 
 
 # Valid transitions: from_state -> allowed to_states.
@@ -77,13 +72,8 @@ _TRANSITIONS: dict[ClipState, set[ClipState]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# InOutRange
-# ---------------------------------------------------------------------------
-
-
 @dataclass
-class InOutRange:
+class FrameRange:
     """Inclusive in/out frame range for sub-clip processing.
 
     Both indices are zero-based and inclusive.
@@ -110,13 +100,8 @@ class InOutRange:
         return self.in_point, self.out_point + 1
 
 
-# ---------------------------------------------------------------------------
-# ClipEntry
-# ---------------------------------------------------------------------------
-
-
 @dataclass
-class ClipEntry:
+class ClipRecord:
     """A single clip with its processing state.
 
     Construct via :func:`from_clip` (preferred) or directly for testing.
@@ -134,7 +119,7 @@ class ClipEntry:
     clip: Clip
     state: ClipState = ClipState.RAW
     manifest: object | None = None  # ClipManifest — avoid circular import at module level
-    in_out_range: InOutRange | None = None
+    in_out_range: FrameRange | None = None
     warnings: list[str] = field(default_factory=list)
     error_message: str | None = None
     _processing: bool = field(default=False, repr=False)
@@ -144,22 +129,18 @@ class ClipEntry:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_clip(cls, clip: Clip) -> ClipEntry:
-        """Create a ClipEntry from a scanner Clip and resolve its initial state.
+    def from_clip(cls, clip: Clip) -> ClipRecord:
+        """Create a ClipRecord from a scanner Clip and resolve its initial state.
 
         Args:
             clip: Clip produced by the scanner stage.
 
         Returns:
-            ClipEntry with state resolved from what is present on disk.
+            ClipRecord with state resolved from what is present on disk.
         """
         entry = cls(clip=clip)
         entry.state = _resolve_state(clip)
         return entry
-
-    # ------------------------------------------------------------------
-    # Identity
-    # ------------------------------------------------------------------
 
     @property
     def name(self) -> str:
@@ -175,10 +156,6 @@ class ClipEntry:
     def output_dir(self) -> Path:
         """Absolute path to the Output subdirectory."""
         return self.root / "Output"
-
-    # ------------------------------------------------------------------
-    # State machine
-    # ------------------------------------------------------------------
 
     @property
     def is_processing(self) -> bool:
@@ -235,10 +212,6 @@ class ClipEntry:
             return
         self.state = _resolve_state(self.clip)
 
-    # ------------------------------------------------------------------
-    # Output inspection
-    # ------------------------------------------------------------------
-
     @property
     def has_outputs(self) -> bool:
         """True if the Output directory contains at least one written frame."""
@@ -268,7 +241,7 @@ class ClipEntry:
         for subdir in ("alpha", "fg", "comp", "processed"):
             d = self.output_dir / subdir
             if d.is_dir():
-                stems = {p.stem for p in get_frame_files(d)}
+                stems = {p.stem for p in list_frames(d)}
                 if stems:
                     stem_sets.append(stems)
 
@@ -279,11 +252,6 @@ class ClipEntry:
         for s in stem_sets[1:]:
             result &= s
         return result
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _resolve_state(clip: Clip) -> ClipState:
@@ -331,3 +299,19 @@ def _resolve_state(clip: Clip) -> ClipState:
             )
 
     return ClipState.RAW
+
+
+def get_clip_state(clip: Clip) -> ClipState:
+    """Resolve the current :class:`ClipState` for a clip from what is on disk.
+
+    Convenience wrapper around the internal ``_resolve_state`` function,
+    exposed as part of the public API.
+
+    Args:
+        clip: :class:`~corridorkey.stages.scanner.contracts.Clip` produced
+            by :func:`~corridorkey.scan`.
+
+    Returns:
+        The most advanced :class:`ClipState` the clip has reached.
+    """
+    return _resolve_state(clip)

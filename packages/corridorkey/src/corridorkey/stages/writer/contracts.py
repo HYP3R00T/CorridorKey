@@ -1,5 +1,3 @@
-"""Writer stage — configuration contract."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,10 +22,12 @@ class WriteConfig:
         fg_format: File format for fg output ("png" or "exr").
         processed_enabled: Write the premultiplied linear RGBA output.
             This is the primary compositor output — transparent regions are
-            correctly zeroed out. Saved as EXR (float32) by default.
+            correctly zeroed out. Defaults to PNG (16-bit).
         processed_format: File format for processed output ("png" or "exr").
         comp_enabled: Write the checkerboard preview composite.
-        comp_format: File format for comp output (always "png").
+        comp_format: File format for comp output. Always "png" — compositors
+            expect sRGB preview images, not HDR. Not exposed in WriterSettings
+            because it cannot be changed.
         exr_compression: EXR compression codec name.
             One of: "none", "rle", "zips", "zip", "piz", "pxr24", "dwaa", "dwab".
     """

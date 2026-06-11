@@ -1,50 +1,30 @@
-"""Inference stage — backend factory.
-
-Single entry point for constructing an inference backend. Callers receive a
-``ModelBackend`` instance that always satisfies the same protocol regardless
-of whether PyTorch or MLX is running underneath.
-
-Backend resolution order:
-    ``InferenceConfig.backend`` field > ``CORRIDORKEY_BACKEND`` env var > auto-detect
-
-Auto-detect:
-    Apple Silicon + ``corridorkey_mlx`` importable + ``.safetensors`` present → mlx
-    Otherwise → torch
-
-Usage::
-
-    config = load_config().to_inference_config(device="cuda")
-    backend = load_backend(config)
-    result = backend.run(preprocessed_frame)
-    print(backend.resolved_config)
-"""
+# Backend factory — single entry point for constructing an inference backend.
+# Resolution order: InferenceConfig.backend field > auto-detect.
+# Auto-detect: Apple Silicon + corridorkey_mlx installed → mlx, else → torch.
 
 from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import platform
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from corridorkey.stages.inference.config import InferenceConfig
 
+if TYPE_CHECKING:
+    from corridorkey.stages.inference.backend import ModelBackend
+
 logger = logging.getLogger(__name__)
 
-_BACKEND_ENV_VAR = "CORRIDORKEY_BACKEND"
 _TORCH_EXT = ".pth"
 _MLX_EXT = ".safetensors"
 _DEFAULT_MLX_TILE_SIZE = 512
 _DEFAULT_MLX_TILE_OVERLAP = 64
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def load_backend(config: InferenceConfig):  # -> ModelBackend
+def load_model_backend(config: InferenceConfig) -> ModelBackend:  # pragma: no cover
     """Construct and return the appropriate inference backend.
 
     Resolves the backend (torch or mlx), resolves "auto" refiner_mode to a
@@ -122,21 +102,9 @@ def discover_checkpoint(checkpoint_dir: str | Path, backend: str = "torch") -> P
     return matches[0]
 
 
-# ---------------------------------------------------------------------------
-# Backend resolution
-# ---------------------------------------------------------------------------
-
-
 def _resolve_backend(requested: str) -> str:
-    """Resolve the backend string to ``"torch"`` or ``"mlx"``.
-
-    Priority: ``config.backend`` field > ``CORRIDORKEY_BACKEND`` env var > auto-detect.
-    """
-    if requested == "auto":
-        env = os.environ.get(_BACKEND_ENV_VAR, "auto").lower()
-        if env != "auto":
-            requested = env
-
+    # Resolve the backend string to "torch" or "mlx".
+    # Priority: config.backend field > auto-detect.
     if requested == "auto":
         return _auto_detect()
 
@@ -150,7 +118,7 @@ def _resolve_backend(requested: str) -> str:
 
 
 def _auto_detect() -> str:
-    """Try MLX on Apple Silicon, fall back to torch."""
+    # Try MLX on Apple Silicon, fall back to torch.
     if sys.platform != "darwin" or platform.machine() != "arm64":
         logger.info("Not Apple Silicon — using torch backend")
         return "torch"
@@ -165,7 +133,7 @@ def _mlx_importable() -> bool:
     return importlib.util.find_spec("corridorkey_mlx") is not None
 
 
-def _assert_mlx_available() -> None:
+def _assert_mlx_available() -> None:  # pragma: no cover
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise RuntimeError("MLX backend requires Apple Silicon (M1+ Mac)")
     if not _mlx_importable():
@@ -175,19 +143,14 @@ def _assert_mlx_available() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Backend loaders
-# ---------------------------------------------------------------------------
-
-
-def _load_mlx_backend(config: InferenceConfig):  # pragma: no cover
-    """Load the MLX engine and wrap it in MLXBackend."""
+def _load_mlx_backend(config: InferenceConfig) -> ModelBackend:  # pragma: no cover
+    # Load the MLX engine and wrap it in MLXBackend.
     from corridorkey.stages.inference.backend import MLXBackend
 
     if config.img_size == 0:
         raise ValueError(
             "InferenceConfig.img_size is 0 (auto-select). "
-            "Resolve img_size to a concrete value before calling load_backend. "
+            "Resolve img_size to a concrete value before calling load_model_backend. "
             "Use pipeline.to_inference_config() which resolves img_size automatically."
         )
 

@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import cv2
+import numpy as np
 import pytest
 from corridorkey.errors import InvalidStateTransitionError
-from corridorkey.runtime.clip_state import ClipEntry, ClipState, InOutRange
+from corridorkey.runtime.clip_state import ClipRecord, ClipState, FrameRange
 from corridorkey.stages.scanner.contracts import Clip
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_clip(tmp_path: Path, has_alpha: bool = False) -> Clip:
@@ -24,41 +24,43 @@ def _make_clip(tmp_path: Path, has_alpha: bool = False) -> Clip:
     return Clip(name="TestClip", root=tmp_path, input_path=input_dir, alpha_path=alpha_dir)
 
 
-def _make_entry(tmp_path: Path, state: ClipState = ClipState.RAW) -> ClipEntry:
+def _write_frames(directory: Path, count: int) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for i in range(count):
+        cv2.imwrite(str(directory / f"frame_{i:06d}.png"), np.zeros((8, 8, 3), dtype=np.uint8))
+
+
+def _make_entry(tmp_path: Path, state: ClipState = ClipState.RAW) -> ClipRecord:
     clip = _make_clip(tmp_path)
-    entry = ClipEntry(clip=clip, state=state)
+    entry = ClipRecord(clip=clip, state=state)
     return entry
 
 
-# ---------------------------------------------------------------------------
 # InOutRange
-# ---------------------------------------------------------------------------
 
 
 class TestInOutRange:
     def test_frame_count(self):
-        r = InOutRange(in_point=0, out_point=9)
+        r = FrameRange(in_point=0, out_point=9)
         assert r.frame_count == 10
 
     def test_contains_in_range(self):
-        r = InOutRange(in_point=5, out_point=10)
+        r = FrameRange(in_point=5, out_point=10)
         assert r.contains(5)
         assert r.contains(7)
         assert r.contains(10)
 
     def test_contains_out_of_range(self):
-        r = InOutRange(in_point=5, out_point=10)
+        r = FrameRange(in_point=5, out_point=10)
         assert not r.contains(4)
         assert not r.contains(11)
 
     def test_to_frame_range(self):
-        r = InOutRange(in_point=2, out_point=7)
+        r = FrameRange(in_point=2, out_point=7)
         assert r.to_frame_range() == (2, 8)
 
 
-# ---------------------------------------------------------------------------
 # ClipEntry properties
-# ---------------------------------------------------------------------------
 
 
 class TestClipEntryProperties:
@@ -86,9 +88,7 @@ class TestClipEntryProperties:
         assert entry.is_processing is False
 
 
-# ---------------------------------------------------------------------------
 # State transitions
-# ---------------------------------------------------------------------------
 
 
 class TestTransitions:
@@ -161,9 +161,7 @@ class TestTransitions:
         assert entry.error_message == "boom"
 
 
-# ---------------------------------------------------------------------------
 # has_outputs / completed_stems
-# ---------------------------------------------------------------------------
 
 
 class TestOutputInspection:
@@ -205,9 +203,7 @@ class TestOutputInspection:
         assert entry.completed_frame_count() == 3
 
 
-# ---------------------------------------------------------------------------
 # refresh_state
-# ---------------------------------------------------------------------------
 
 
 class TestRefreshState:
@@ -226,9 +222,7 @@ class TestRefreshState:
         assert entry.state == ClipState.RAW
 
 
-# ---------------------------------------------------------------------------
 # from_clip
-# ---------------------------------------------------------------------------
 
 
 class TestFromClip:
@@ -240,7 +234,7 @@ class TestFromClip:
 
         cv2.imwrite(str(input_dir / "frame_000001.png"), np.zeros((8, 8, 3), dtype=np.uint8))
         clip = Clip(name="c", root=tmp_path, input_path=input_dir, alpha_path=None)
-        entry = ClipEntry.from_clip(clip)
+        entry = ClipRecord.from_clip(clip)
         assert entry.state == ClipState.RAW
 
     def test_from_clip_resolves_extracting_for_video(self, tmp_path):
@@ -248,5 +242,132 @@ class TestFromClip:
         video_path.write_bytes(b"")
         clip = Clip(name="c", root=tmp_path, input_path=video_path, alpha_path=None)
         with patch("corridorkey.stages.loader.extractor.is_video", return_value=True):
-            entry = ClipEntry.from_clip(clip)
+            entry = ClipRecord.from_clip(clip)
         assert entry.state == ClipState.EXTRACTING
+
+
+class TestClipEntryWarningsAndManifest:
+    def test_warnings_empty_by_default(self, tmp_path):
+        entry = _make_entry(tmp_path)
+        assert entry.warnings == []
+
+    def test_warnings_can_be_appended(self, tmp_path):
+        entry = _make_entry(tmp_path)
+        entry.warnings.append("partial alpha detected")
+        assert len(entry.warnings) == 1
+        assert "partial alpha" in entry.warnings[0]
+
+    def test_manifest_none_by_default(self, tmp_path):
+        entry = _make_entry(tmp_path)
+        assert entry.manifest is None
+
+    def test_manifest_can_be_set(self, tmp_path):
+        entry = _make_entry(tmp_path)
+        fake_manifest = object()
+        entry.manifest = fake_manifest
+        assert entry.manifest is fake_manifest
+
+    def test_error_message_none_by_default(self, tmp_path):
+        entry = _make_entry(tmp_path)
+        assert entry.error_message is None
+
+
+class TestCompletedFrameCountNoOutputDir:
+    def test_completed_frame_count_no_output_dir(self, tmp_path: Path):
+        """completed_frame_count() when output_dir doesn't exist returns 0 (line 251)."""
+        clip = _make_clip(tmp_path)
+        entry = ClipRecord(clip=clip, state=ClipState.RAW)
+        # Output dir does not exist
+        assert not entry.output_dir.exists()
+        assert entry.completed_frame_count() == 0
+
+
+class TestResolveStateComplete:
+    def test_resolve_state_complete_when_all_outputs_present(self, tmp_path: Path):
+        """_resolve_state returns COMPLETE when alpha + all output subdirs have enough frames."""
+
+        from corridorkey.runtime.clip_state import _resolve_state
+
+        n = 3
+        input_dir = tmp_path / "Input"
+        _write_frames(input_dir, n)
+
+        alpha_dir = tmp_path / "AlphaHint"
+        _write_frames(alpha_dir, n)
+
+        for subdir in ("alpha", "fg"):
+            _write_frames(tmp_path / "Output" / subdir, n)
+
+        clip = Clip(name="c", root=tmp_path, input_path=input_dir, alpha_path=alpha_dir)
+        state = _resolve_state(clip)
+        assert state == ClipState.COMPLETE
+
+    def test_resolve_state_ready_when_outputs_incomplete(self, tmp_path: Path):
+        from corridorkey.runtime.clip_state import _resolve_state
+
+        n = 3
+        input_dir = tmp_path / "Input"
+        _write_frames(input_dir, n)
+
+        alpha_dir = tmp_path / "AlphaHint"
+        _write_frames(alpha_dir, n)
+
+        _write_frames(tmp_path / "Output" / "alpha", 1)
+
+        clip = Clip(name="c", root=tmp_path, input_path=input_dir, alpha_path=alpha_dir)
+        state = _resolve_state(clip)
+        assert state == ClipState.READY
+
+    def test_resolve_state_ready_when_no_output_dir(self, tmp_path: Path):
+        from corridorkey.runtime.clip_state import _resolve_state
+
+        n = 3
+        input_dir = tmp_path / "Input"
+        _write_frames(input_dir, n)
+
+        alpha_dir = tmp_path / "AlphaHint"
+        _write_frames(alpha_dir, n)
+
+        clip = Clip(name="c", root=tmp_path, input_path=input_dir, alpha_path=alpha_dir)
+        state = _resolve_state(clip)
+        assert state == ClipState.READY
+
+    def test_resolve_state_raw_when_partial_alpha(self, tmp_path: Path):
+        from corridorkey.runtime.clip_state import _resolve_state
+
+        n = 5
+        input_dir = tmp_path / "Input"
+        _write_frames(input_dir, n)
+
+        alpha_dir = tmp_path / "AlphaHint"
+        _write_frames(alpha_dir, 2)
+
+        clip = Clip(name="c", root=tmp_path, input_path=input_dir, alpha_path=alpha_dir)
+        state = _resolve_state(clip)
+        assert state == ClipState.RAW
+
+    def test_resolve_state_extracting_for_video_input(self, tmp_path: Path):
+        from corridorkey.runtime.clip_state import _resolve_state
+
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"fake")
+        clip = Clip(name="c", root=tmp_path, input_path=video, alpha_path=None)
+        with patch("corridorkey.stages.loader.extractor.is_video", return_value=True):
+            state = _resolve_state(clip)
+        assert state == ClipState.EXTRACTING
+
+
+class TestVersionFallback:
+    def test_version_fallback_when_not_installed(self):
+        """The PackageNotFoundError fallback sets __version__ to dev string."""
+        from importlib.metadata import PackageNotFoundError
+
+        with patch("importlib.metadata.version", side_effect=PackageNotFoundError("corridorkey")):
+            try:
+                from importlib.metadata import version as _version
+
+                v = _version("corridorkey-nonexistent-package-xyz")
+            except PackageNotFoundError:
+                v = "0.0.0.dev0"
+
+        assert v == "0.0.0.dev0"

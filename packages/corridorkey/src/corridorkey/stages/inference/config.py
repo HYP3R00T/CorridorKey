@@ -1,5 +1,3 @@
-"""Inference stage — configuration contract."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,6 +8,7 @@ import torch
 
 RefinerMode = Literal["auto", "full_frame", "tiled"]
 BackendChoice = Literal["auto", "torch", "mlx"]
+FlashAttentionMode = Literal["auto", "on", "off"]
 
 # Valid img_size values. 0 means auto-select based on VRAM.
 VALID_IMG_SIZES = (0, 512, 1024, 1536, 2048)
@@ -89,7 +88,11 @@ class InferenceConfig:
                       else → torch.
             "torch" — always use PyTorch (CUDA / ROCm / MPS / CPU).
             "mlx"   — always use MLX (Apple Silicon only, optional package).
-            Can also be overridden via the CORRIDORKEY_BACKEND env var.
+            Resolved from the TOML config, with auto-detection as the fallback.
+        flash_attention: Controls the Hiera global-attention FlashAttention patch.
+            "auto" — enabled on CUDA, disabled on CPU/MPS (default).
+            "on"   — force enable (useful on ROCm once SDPA support matures).
+            "off"  — force disable (debugging, regression isolation).
     """
 
     checkpoint_path: Path
@@ -101,6 +104,7 @@ class InferenceConfig:
     refiner_mode: RefinerMode = "auto"
     refiner_scale: float = 1.0
     backend: BackendChoice = "auto"
+    flash_attention: FlashAttentionMode = "auto"
 
     def __post_init__(self) -> None:
         if self.img_size not in VALID_IMG_SIZES:

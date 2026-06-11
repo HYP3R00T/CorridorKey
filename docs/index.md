@@ -1,15 +1,18 @@
 # CorridorKey
 
-AI-powered green screen keyer by Corridor Digital.
+AI-powered green screen keyer by Corridor Digital. Removes green screens from video clips using a neural network inference pipeline.
 
-## I want to use CorridorKey
+CorridorKey is built as two separate packages:
 
-Start with the [Guide](guide/index.md). It covers installation, first run, processing footage, and understanding the outputs. No programming knowledge required.
+- `corridorkey` — the core pipeline library. Import it to build your own interface, plugin, or automation.
+- `corridorkey-cli` — the `ck` command-line tool. Install it to process clips from a terminal.
 
-## I want to build with CorridorKey
+## Where to go
 
-Start with the [Developer Docs](dev/index.md). It covers the three-layer architecture, package internals, API reference, and contribution standards.
-
-## I want to understand how it works
-
-Start with the [Knowledge](knowledge/index.md) section. It covers the six pipeline stages, the data contracts between them, the configuration system, and the reasoning behind key design decisions.
+| I want to... | Go to |
+|---|---|
+| Process clips from the terminal | [User Guide](guide/index.md) |
+| Understand how the AI keying works | [Theory](theory/index.md) |
+| Build a tool on top of the library | [API Reference](api/corridorkey/index.md) |
+| Understand how the pipeline is built | [Architecture](architecture/index.md) |
+| Contribute or set up a dev environment | [Developer Guide](dev/index.md) |

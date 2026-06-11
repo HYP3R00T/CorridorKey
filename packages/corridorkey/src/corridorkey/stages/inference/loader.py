@@ -1,22 +1,3 @@
-"""Inference stage — model loader.
-
-Responsible for constructing a GreenFormer instance, loading a checkpoint,
-and handling the two edge cases that arise in practice:
-
-  1. Compiled checkpoints — keys prefixed with ``_orig_mod.`` from
-     ``torch.compile`` must be stripped before loading.
-
-  2. Position embedding shape mismatch — when a checkpoint trained at one
-     img_size is loaded for a different img_size, pos_embed tensors are
-     bicubically interpolated to the new grid size.
-
-Post-load fixups:
-  - Refiner kept in float32 (GroupNorm does not support bf16 on CUDA).
-  - All BatchNorm2d layers kept in float32 for the same reason.
-  - torch.compile applied in full_frame mode on CUDA (disabled in tiled mode
-    because hooks + compile are incompatible with Dynamo tracing).
-"""
-
 from __future__ import annotations
 
 import logging
@@ -52,6 +33,7 @@ def load_model(config: InferenceConfig, resolved_refiner_mode: str | None = None
 
     Raises:
         FileNotFoundError: If the checkpoint file does not exist.
+        ValueError: If img_size is 0 (not yet resolved from auto-select).
         RuntimeError: If the checkpoint cannot be loaded.
     """
     from corridorkey.stages.inference.model import GreenFormer
@@ -68,15 +50,20 @@ def load_model(config: InferenceConfig, resolved_refiner_mode: str | None = None
         )
 
     # Use the pre-resolved mode so compile decisions are made on the concrete
-    # value, not "auto". Callers (factory.load_backend) resolve this before
+    # value, not "auto". Callers (factory.load_model_backend) resolve this before
     # calling load_model.
     effective_mode = resolved_refiner_mode or config.refiner_mode
 
     logger.info("Building GreenFormer (img_size=%d, refiner=%s)", config.img_size, config.use_refiner)
+    # Resolve flash_attention mode: "auto" enables on CUDA, "on" forces it,
+    # "off" disables it regardless of device.
+    _device_type = torch.device(config.device).type
+    flash_attention = config.flash_attention == "on" or (config.flash_attention == "auto" and _device_type == "cuda")
     model = GreenFormer(
         encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k",
         img_size=config.img_size,
         use_refiner=config.use_refiner,
+        flash_attention=flash_attention,
     )
     model = model.to(config.device)
     model = model.to(config.model_precision)
@@ -98,62 +85,64 @@ def load_model(config: InferenceConfig, resolved_refiner_mode: str | None = None
     if unexpected:
         logger.warning("Checkpoint unexpected keys: %s", unexpected)
 
-    # GroupNorm (refiner) and BatchNorm2d (decoder head) do not support
-    # bf16/fp16 on CUDA — keep them in float32 regardless of backbone dtype.
-    if config.model_precision != torch.float32:
-        if model.refiner is not None:
-            model.refiner.float()
-            logger.info("Refiner kept in float32 (GroupNorm bf16/fp16 unsupported on CUDA)")
-        for module in model.modules():
-            if isinstance(module, torch.nn.BatchNorm2d):
-                module.float()
-        logger.info("BatchNorm2d layers kept in float32")
+    _apply_dtype_fixups(model, config)
 
-    # torch.compile: full_frame mode on CUDA only.
-    # Disabled in tiled mode — hooks + compile are incompatible (Dynamo
-    # sees the refiner module twice and raises "already tracked for mutation").
-    # Uses effective_mode (already resolved from "auto") so that auto→full_frame
-    # correctly enables compile.
     device_type = torch.device(config.device).type
     use_compile = effective_mode == "full_frame" and device_type == "cuda" and sys.platform in ("linux", "win32")
     if use_compile:
-        try:
-            cache_dir = Path.home() / ".cache" / "corridorkey" / "torch_compile"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(cache_dir)
-            compiled = torch.compile(model)
-            logger.info("Warming up compiled model...")
-            # Use model_precision for the dummy — the compiled graph is traced
-            # with this dtype and must match what inference will send.
-            dummy = torch.zeros(
-                1, 4, config.img_size, config.img_size, dtype=config.model_precision, device=config.device
-            )
-            with torch.inference_mode():
-                compiled(dummy)
-            del dummy
-            torch.cuda.empty_cache()
-            logger.info("Warm-up complete.")
-            return compiled  # type: ignore[return-value]
-        except Exception as e:
-            logger.warning("torch.compile failed (%s) — falling back to eager mode.", e)
-            torch.cuda.empty_cache()
+        compiled = _try_compile(model, config)
+        if compiled is not None:
+            return compiled
 
     logger.info("Model loaded successfully")
     return model
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _apply_dtype_fixups(model: torch.nn.Module, config: InferenceConfig) -> None:
+    # GroupNorm (refiner) and BatchNorm2d (decoder head) do not support
+    # bf16/fp16 on CUDA — keep them in float32 regardless of backbone dtype.
+    if config.model_precision == torch.float32:
+        return
+    if model.refiner is not None:
+        model.refiner.float()
+        logger.info("Refiner kept in float32 (GroupNorm bf16/fp16 unsupported on CUDA)")
+    for module in model.modules():
+        if isinstance(module, torch.nn.BatchNorm2d):
+            module.float()
+    logger.info("BatchNorm2d layers kept in float32")
+
+
+def _try_compile(model: torch.nn.Module, config: InferenceConfig) -> torch.nn.Module | None:
+    # Attempt torch.compile with a warm-up pass. Returns the compiled model on
+    # success, or None if compile fails (caller falls back to eager mode).
+    try:
+        cache_dir = Path.home() / ".cache" / "corridorkey" / "torch_compile"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(cache_dir)
+        compiled = torch.compile(model)
+        logger.info("Warming up compiled model...")
+        # Use model_precision for the dummy — the compiled graph is traced
+        # with this dtype and must match what inference will send.
+        dummy = torch.zeros(1, 4, config.img_size, config.img_size, dtype=config.model_precision, device=config.device)
+        with torch.inference_mode():
+            compiled(dummy)
+        del dummy
+        torch.cuda.empty_cache()
+        logger.info("Warm-up complete.")
+        return compiled  # type: ignore[return-value]
+    except Exception as e:
+        logger.warning("torch.compile failed (%s) — falling back to eager mode.", e)
+        torch.cuda.empty_cache()
+        return None
 
 
 def _strip_compiled_prefix(state_dict: dict) -> dict:
-    """Remove the ``_orig_mod.`` prefix added by ``torch.compile``."""
+    # Remove the _orig_mod. prefix added by torch.compile.
     return {(k[10:] if k.startswith("_orig_mod.") else k): v for k, v in state_dict.items()}
 
 
 def _resize_pos_embeds(state_dict: dict, model: torch.nn.Module) -> dict:
-    """Bicubically interpolate position embeddings when grid sizes differ."""
+    # Bicubically interpolate position embeddings when grid sizes differ.
     model_state = model.state_dict()
     new_state: dict = {}
 
